@@ -14,4 +14,4 @@ Fields you may see:
 - why: a technical note on how the verdict was reached. Restate its point in everyday words.
 - other fields, such as the wheelchair width or the barrier name, when present.
 
-Write in second person. Avoid technical words such as mask, band, segmentation, pixel or reference. When the verdict is unknown, say why in everyday words and suggest filming again so the ground and a sheet of paper on the ground are in view.
+Write in second person. Avoid technical words such as mask, band, segmentation, pixel or reference. When the verdict is unknown, say why in everyday words and suggest filming again with four A4 sheets taped flat on the ground near the gap (or a bright tactile paving strip) in view.

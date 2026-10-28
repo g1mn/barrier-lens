@@ -431,7 +431,7 @@ def _template(measurement: dict) -> str:
             "tight": "It is tight here: your wheelchair may just fit, with very little room.",
             "blocked": "Your wheelchair will not fit through here.",
             }.get(verdict, "We could not measure this gap, so we cannot say whether your wheelchair fits. "
-                           "Try filming again with the ground and a sheet of paper on it in view.")
+                           "Try filming again with four A4 sheets taped flat on the ground near the gap, or a bright tactile paving strip, in view.")
     if verdict == "unknown" or not isinstance(gap, (int, float)):
         return lead
     size = f"The free gap measures about {round(gap)} cm"
