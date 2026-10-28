@@ -16,7 +16,10 @@ read 2026-10-28):
   <Nf>id<|box;x1=..;y1=..;x2=..;y2=..;w=..;h=..[;c=..]|><|mask;x=0;y=0[;c=..];data=H,W,<enc>payload|>,id<|box..
   Frames with nothing visible emit no line. The stream ends with response.completed; its
   response.usage.video_frames_processed is the billed frame count ($0.20 per 1,000 frames, at least 50 per request).
-- Box x2/y2 are inclusive. The mask raster is box-local (H,W equal the box height,width in every documented example).
+- Box x2/y2 are inclusive. The mask raster is box-local (H,W equal the box height,width in every documented example;
+  the docs only say "smaller than the frame"). First real call 2026-10-28 (720x1280, 30 frames, 60 masks): 0 needed
+  resizing and every decoded mask stayed inside its box.
+- Concept wording matters: on the same clip "e-scooter" returned zero matches, "scooter" returned 2 tracked objects.
   The payload codec is undocumented, so masks are decoded with Meta's meta-sam-parser (decode_mask_to_raster).
 
 Never logs or prints the API key.
@@ -482,6 +485,7 @@ async def _stream_once(client: httpx.AsyncClient, api_key: str, body: dict) -> d
     deltas: list[str] = []
     done_text = response = outcome = None
     first = None
+    events: dict[str, int] = {}
     headers = {**_auth(api_key), "Accept": "text/event-stream"}
     async with client.stream("POST", f"{API_BASE}/responses", json=body, headers=headers) as r:
         if r.status_code != 200:
@@ -495,6 +499,7 @@ async def _stream_once(client: httpx.AsyncClient, api_key: str, body: dict) -> d
                 continue
             ev = json.loads(data)
             t = ev.get("type")
+            events[t] = events.get(t, 0) + 1
             if t == "response.output_text.delta":
                 first = first or time.monotonic() - t0
                 deltas.append(ev.get("delta") or "")
@@ -515,7 +520,17 @@ async def _stream_once(client: httpx.AsyncClient, api_key: str, body: dict) -> d
     if outcome is None:
         raise SamError("SAM stream ended without response.completed", code="eof", retryable=True)
     return {"deltas": deltas, "done_text": done_text, "response": response, "outcome": outcome,
-            "latency_s": time.monotonic() - t0, "first_frame_s": first, "request_id": request_id}
+            "latency_s": time.monotonic() - t0, "first_frame_s": first, "request_id": request_id, "events": events}
+
+
+def _response_text(response: dict | None) -> str:
+    """output_text parts of a terminal response object (fallback when the stream carried no text deltas)."""
+    parts = []
+    for item in (response or {}).get("output") or []:
+        for c in item.get("content") or [] if isinstance(item, dict) else []:
+            if isinstance(c, dict) and c.get("type") == "output_text" and c.get("text"):
+                parts.append(c["text"])
+    return "\n".join(parts)
 
 
 async def _with_retries(fn, attempts: int = 4):
@@ -566,6 +581,8 @@ async def _live(clip: dict, concept: str, settings: dict, api_key: str, client: 
         text = "\n".join(res["deltas"])  # docs: one delta per frame line; guard against deltas without newlines
     if not res["deltas"] and res["done_text"]:
         text = res["done_text"]
+    if not text.strip():
+        text = _response_text(res["response"])
     return res, text
 
 
@@ -674,8 +691,11 @@ async def segment_video(video_path: str, concept: str, *, mode: str | None = Non
         "usage": resp.get("usage"), "frames_billed": billed, "cost_usd": cost, "cost_basis": basis,
         "latency_s": round(res["latency_s"], 3),
         "first_frame_s": round(res["first_frame_s"], 3) if res["first_frame_s"] is not None else None,
-        "settings": settings, "cache": "miss",
+        "settings": settings, "cache": "miss", "stream_events": res.get("events"),
+        "response_output_items": len(resp.get("output") or []),
     })
+    if not out["frames"]:
+        out["diagnostics"].append("zero matches: SAM returned no frame lines for this concept (not an error)")
     _write_atomic(json_path, json.dumps(out, separators=(",", ":")))
     log.info("sam %s %r: %d frames with objects, billed %s, %.2fs", src.name, concept, len(out["frames"]),
              billed, res["latency_s"])

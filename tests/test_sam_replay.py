@@ -173,3 +173,29 @@ def test_live_path_against_mock_api(tmp_path, monkeypatch):
     assert first["clip"]["prepped"] is True
     assert int(sam.decode_mask(first["frames"][0]["objects"][0]).sum()) == 1539
     assert second["frames"] == first["frames"]
+
+
+REAL = sam.FIXTURE_DIR / "scooters-row-scooter.json"
+
+
+@pytest.mark.skipif(not REAL.exists(), reason="real SAM fixture not recorded")
+def test_real_fixture_replays_by_clip_hash(isolated, monkeypatch):
+    """Recorded SAM 3.1 output (scooters-row, concept scooter): exact-hash replay, full-frame masks inside boxes."""
+    fx = json.loads(REAL.read_text())
+    monkeypatch.setenv("SAM_MODE", "replay")
+    monkeypatch.setattr(sam, "_sha256", lambda p: fx["clip_sha256"])
+    out = asyncio.run(sam.segment_video(str(isolated), "Scooter"))
+    assert out["replay_fixture"] == REAL.name and out["cost_usd"] == 0.0
+    assert (out["width"], out["height"]) == (720, 1280) and 0 < len(out["frames"]) <= 30
+    for fr in out["frames"]:
+        for o in fr["objects"]:
+            m = sam.decode_mask(o)
+            assert m.shape == (1280, 720) and m.dtype == bool and m.any()
+            ys, xs = np.nonzero(m)
+            x0, y0, x1, y1 = o["box"]
+            assert x0 <= xs.min() and xs.max() < x1 and y0 <= ys.min() and ys.max() < y1
+
+
+def test_text_falls_back_to_terminal_response_output():
+    resp = {"output": [{"type": "message", "content": [{"type": "output_text", "text": DOC_LINE}]}]}
+    assert sam._response_text(resp) == DOC_LINE and sam._response_text(None) == ""

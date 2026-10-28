@@ -28,7 +28,9 @@ def default_clip() -> Path | None:
     return min(clips, key=lambda p: p.stat().st_size) if clips else None
 
 
-def trim(src: Path, seconds: float) -> Path:
+def trim(src: Path, seconds: float, duration: float | None = None) -> Path:
+    if duration is not None and duration <= seconds + 0.05:
+        return src  # already short enough; keep its hash so replay fixtures match the clip you passed
     out = sam.CACHE_DIR / "probe" / f"{src.stem}-{seconds:g}s.mp4"
     if not out.exists():
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -44,6 +46,7 @@ async def main() -> int:
     ap.add_argument("--seconds", type=float, default=3.0)
     ap.add_argument("--models-only", action="store_true")
     ap.add_argument("--fresh", action="store_true", help="ignore the cache and pay for a new call")
+    ap.add_argument("--save-fixture", metavar="NAME", help="write data/fixtures/sam/NAME.json (first 30 frames)")
     a = ap.parse_args()
 
     clip = Path(a.clip) if a.clip else default_clip()
@@ -74,7 +77,7 @@ async def main() -> int:
         if a.models_only:
             return 0
 
-        short = trim(clip, a.seconds)
+        short = trim(clip, a.seconds, ((await sam.probe_video(clip)) or {}).get("duration_s"))
         info = await sam.probe_video(short)
         print(f"clip: {clip.name} -> {short.name} ({short.stat().st_size} bytes) probe={info}")
         print(f"concept: {a.concept!r}  settings: {sam._settings()}")
@@ -91,16 +94,36 @@ async def main() -> int:
     n_obj = sorted({o['id'] for f in out['frames'] for o in f['objects']})
     print(f"frames: clip {out.get('frame_count')} @ {out.get('fps')} fps, {len(out['frames'])} with objects, "
           f"object ids {n_obj}, frame size {out.get('width')}x{out.get('height')}")
+    spent = "$0 now (cache hit; numbers below are from the original call)" if out.get("cache") == "hit" else "this call"
+    print(f"spend: {spent}")
     print(f"billed frames: {out.get('frames_billed')}  cost: ${out.get('cost_usd')}  ({out.get('cost_basis')})")
     print(f"usage: {out.get('usage')}")
+    print(f"stream events: {out.get('stream_events')}  response output items: {out.get('response_output_items')}")
     print(f"response_id: {out.get('response_id')}  request_id: {out.get('request_id')}")
     if out["frames"]:
         o = out["frames"][0]["objects"][0]
         print(f"first object: frame {out['frames'][0]['i']} id {o['id']} score {o['score']} box {o['box']} "
               f"mask area {int(sam.decode_mask(o).sum())} px")
+    per_frame = [len(f["objects"]) for f in out["frames"]]
+    print(f"objects per frame: {per_frame}")
     if out.get("diagnostics"):
         print("diagnostics:", out["diagnostics"][:5])
+    if a.save_fixture:
+        path = save_fixture(out, a.save_fixture)
+        print(f"fixture: {path.relative_to(ROOT)} ({path.stat().st_size} bytes)")
     return 0
+
+
+def save_fixture(out: dict, name: str, max_frames: int = 30) -> Path:
+    """Replay fixture from a real result: same clip hash and concept, masks for at most max_frames frames."""
+    keep = ("concept", "fps", "width", "height", "frame_count", "model", "outcome", "response_id", "usage",
+            "frames_billed", "cost_usd", "cost_basis", "latency_s", "first_frame_s", "settings", "diagnostics")
+    fx = {"note": f"Real SAM 3.1 output (Meta Model API, {out.get('response_id')}), first {max_frames} frames kept.",
+          "clip_sha256": out["clip"]["sha256"], "clip_name": Path(out["clip"]["path"]).name,
+          **{k: out.get(k) for k in keep}, "frames": out["frames"][:max_frames]}
+    path = sam.FIXTURE_DIR / f"{sam._slug(name)}.json"
+    sam._write_atomic(path, sam.json.dumps(fx, separators=(",", ":")))
+    return path
 
 
 if __name__ == "__main__":
