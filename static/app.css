@@ -328,3 +328,6 @@ input[type="file"]::file-selector-button {
 .stages .st { color: var(--muted); font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: no-preference) { .stages li[data-state="run"] b { animation: pulse 1.2s ease-in-out infinite; } }
 @keyframes pulse { 50% { opacity: .45; } }
+
+.fixit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 10px; }
+.fixit .hint { font-size: .86rem; }

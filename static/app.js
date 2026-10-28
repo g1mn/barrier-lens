@@ -561,6 +561,41 @@
     sec.hidden = !(rows.length || p.state);
   }
 
+
+  // An "unknown" that calibration can fix gets a button for it: the tilt sensor, or the one-time calibration.
+  const FIX_FOR = {
+    tilt: ['Turn on phone tilt', 'The tilt was not recorded. With the sensor on, the next clip carries it.', 'tilt'],
+    default_pass: ['Calibrate now', 'Nothing confirmed the scale. Tilt or a one-time calibration does.', 'calib'],
+    height: ['Calibrate now', 'Your armrest height sets how high the phone is.', 'calib'],
+    'field of view': ['Calibrate now', 'Your camera\u2019s angle of view is not known yet.', 'calib'],
+    roll: ['How to hold the phone', 'Hold it level, not tipped to one side.', 'calib'],
+  };
+  function renderFixit(r, verdict) {
+    const p = $('#v-fixit');
+    const d = r.measurement_detail || {};
+    let fix = verdict === 'unknown' && !r.handmade && FIX_FOR[d.capped || d.dominant_error];
+    if (fix && fix[2] === 'tilt' && $('#tilt-row').hidden) {  // no tilt sensor on this device
+      fix = ['Calibrate now', 'The tilt was not recorded. A one-time calibration with four A4 sheets on the ground tells us your usual tilt.', 'calib'];
+    }
+    p.hidden = !fix;
+    if (!fix) return;
+    $('#fixit-btn').textContent = fix[0];
+    $('#fixit-why').textContent = fix[1];
+    $('#fixit-btn').dataset.target = fix[2];
+  }
+  $('#fixit-btn').addEventListener('click', () => {
+    if ($('#fixit-btn').dataset.target === 'tilt') {
+      $('#tilt-row').scrollIntoView({ block: 'center' });
+      $('#tilt-btn').focus();
+      if ($('#tilt-btn').getAttribute('aria-pressed') !== 'true') $('#tilt-btn').click();
+      return;
+    }
+    const det = $('#calib');
+    det.open = true;
+    det.scrollIntoView({ block: 'start' });
+    $('#cal-width').focus();
+  });
+
   function renderVerdict(result, sample) {
     const tri = result.triage;
     const verdict = VERDICT_WORD[result.verdict] ? result.verdict : 'unknown';
@@ -580,6 +615,7 @@
     $('#v-band').textContent = Array.isArray(result.band_cm) ? bandText(result.band_cm) : '—';
     renderAssumptions(result);
     renderBar(result);
+    renderFixit(result, verdict);
     renderNotes(result);
     renderSaw(result);
     $('#v-why').textContent = (result.why || '').replace(/\(default \((.*?)\)\)/g, '($1)');
