@@ -106,7 +106,7 @@ def main():
                 res[name] = {"skipped": pose[1] or "no pitch from lines"}
                 continue
             r = geometry.measure_gap(pose, bars, size, walkway_edge=edge, contact_px=a["px_sd"], n_draws=draws,
-                                     wheelchair_cm=70.0)
+                                     wheelchair_cm=70.0, ahead_only=False)  # the annotated ends, wherever they sit
             band = r.get("band_cm")
             d = r.get("detail") or {}
             res[name] = {"gap_cm": r.get("gap_cm"), "band_cm": band, "verdict": r["verdict"],

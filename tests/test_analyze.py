@@ -442,8 +442,11 @@ def test_named_recorded_samples(env):
     j = c.get("/api/sample", params={"name": "closed"}).json()
     assert j["verdict"] == "blocked" and j["triage"]["path"]["state"] == "closed"
     assert j["measurement_detail"]["override"] == "path_closed" and c.get(j["video_url"]).status_code == 200
-    s = c.get("/api/sample", params={"name": "scooters"}).json()
-    assert len(s["measurement_detail"]["gap_px"]) == 2 and s["recorded"]["name"] == "scooters"
+    s = c.get("/api/sample", params={"name": "scooters"}).json()  # filmed facing a parked row: nothing straight ahead
+    assert s["verdict"] == "unknown" and s["gap_cm"] is None and s["recorded"]["name"] == "scooters"
+    k = c.get("/api/sample", params={"name": "known"}).json()     # SANPO: camera height and tilt known
+    assert k["verdict"] == "passes" and k["assumptions"]["mode"] == "calibrated"
+    assert len(k["measurement_detail"]["gap_px"]) == 2 and k["band_cm"][0] >= 75
     assert c.get("/api/sample", params={"name": "nope"}).status_code == 404
 
 

@@ -170,6 +170,28 @@ def test_pose_needs_two_barriers_and_a_height():
     assert geometry.measure_gap({**p, "height_m": None}, s["barrier_masks"], SIZE)["verdict"] == "unknown"
 
 
+def test_only_passages_on_the_line_of_travel_count():
+    """A fence on the left, a row of jersey barriers on the right and an object beyond them (the SANPO corridor that
+    once measured 13 m): the space beyond the row is the widest but nobody can reach it from here, so the corridor is
+    chosen. Barriers outlined on one side only, or one behind the other, give unknown."""
+    fence = np.array([[-120.0, y] for y in range(200, 700, 50)])
+    row = [np.array([[40.0 + 5 * k, y] for y in range(300 + 200 * k, 450 + 200 * k, 50)]) for k in range(3)]
+    far = np.array([[400.0, 1800.0], [450.0, 1800.0]])
+    sets, labels, left = [fence, *row, far], ["b0", "b1", "b2", "b3", "b4"], [True, False, False, False, False]
+    p = geometry._passages(sets, None, labels, left)
+    best = geometry._widest(p)
+    assert p[best][0] == "b0|b1" and max(d for _, d, _ in p) > p[best][1], p
+    assert geometry._widest(geometry._passages(sets[1:], None, labels[1:], left[1:])) is None
+    # 10-29 scooters clip: a scooter and the bicycle parked behind it straddle the centre line, one behind the other
+    scooter, bike = np.array([[-29.0, 150.0], [26.0, 199.0]]), np.array([[-18.0, 190.0], [43.0, 294.0]])
+    assert geometry._passages([scooter, bike], None, ["b0", "b1"], [True, False])[0][2] is False
+
+    s = scene(90, 3.0, 0.0)                     # end to end: the right barrier alone has nothing to measure across
+    right = [m for m in s["barrier_masks"] if np.median(np.nonzero(m)[1]) > SIZE[0] / 2]
+    r = geometry.measure_gap(poses(s)["calibrated"], [right[0], np.roll(right[0], 120, axis=1)], SIZE)
+    assert r["verdict"] == "unknown" and r["why"] == geometry.NONE_AHEAD, r["why"]
+
+
 def teardown_module(module):
     rows = [(k, v) for k, v in TABLE.items() if k != "biased"]
     if rows:

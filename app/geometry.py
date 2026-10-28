@@ -28,8 +28,14 @@ The image side comes from "corners" (4 points) or "mask" (bool array or a SAM ob
 Gap: barrier ground contact = the lowest mask pixel in each column (its bottom edge), mapped to the ground. The
 reported gap is the widest passage among neighbouring barriers (sorted left to right by ground X), each passage
 measured as the shortest ground distance between the two contact sets -- the narrowest point a wheelchair must
-squeeze through. walkway_edge (two image points on a curb or wall line) adds the passages between the outermost
-barrier and that edge. Every candidate passage is listed in detail["gaps"].
+squeeze through. Only a passage straight ahead counts ("ahead"): the left barrier's contacts sit mostly left of the
+image centre column (the camera's line of travel), the right one's mostly right of it, and the two stand side by side
+rather than one behind the other (their ground X ranges overlap by at most half the narrower one). The user films the
+way they want to go, so the space between barriers lined up along one side, objects beyond a wall of barriers, or a
+scooter and the bicycle parked behind it are listed with "ahead": false and never chosen. If no passage is ahead, the
+result is unknown. walkway_edge (two
+image points on a curb or wall line) adds the passage between the outermost barrier and that edge. Every candidate
+passage is listed in detail["gaps"].
 
 Error band: Monte Carlo. Each draw moves every reference corner by N(0, (corner_px/2)^2) per axis (about +-corner_px at
 2 sigma) and shifts each barrier's whole contact line by N(0, contact_px^2) per axis (mask edges err as a whole, not
@@ -248,18 +254,51 @@ def _gap_ends_px(label: str, contacts: list, labels: list, edge_img, to_ground) 
         return None
 
 
-def _passages(ground_sets: list[np.ndarray], edge: np.ndarray | None, labels: list[str]):
-    """Neighbour passages, left to right: [(label, distance)]."""
+MIN_X_EXTENT_CM = 10.0   # a contact line seen end-on spans almost no ground X; treat it as at least this wide
+
+
+def _side_by_side(a: np.ndarray, b: np.ndarray) -> bool:
+    """Ground X ranges (5th-95th percentile) overlap by at most half the narrower one: not one behind the other."""
+    (a0, a1), (b0, b1) = np.percentile(a[:, 0], [5, 95]), np.percentile(b[:, 0], [5, 95])
+    return bool(min(a1, b1) - max(a0, b0) <= 0.5 * max(MIN_X_EXTENT_CM, min(a1 - a0, b1 - b0)))
+
+
+def _left_of_centre(contacts: list[np.ndarray], width: int) -> list[bool]:
+    """Per barrier: do its ground contacts sit mostly left of the image centre column (the camera's line of travel)?"""
+    return [bool(np.median(c[:, 0]) < width / 2) for c in contacts]
+
+
+def _passages(ground_sets: list[np.ndarray], edge: np.ndarray | None, labels: list[str], left: list[bool] | None):
+    """Neighbour passages, left to right: [(label, distance, ahead)]; ahead = the pair spans the line of travel and
+    stands side by side (all of them when left is None).
+    ponytail: one image-centre split; a barrier dead ahead offers only the passage on its smaller side of the centre
+    line. Score both sides of it if real clips need that."""
     order = np.argsort([np.median(g[:, 0]) for g in ground_sets])
     out = []
     for i, j in zip(order[:-1], order[1:]):
-        out.append((f"{labels[i]}|{labels[j]}", _set_distance(ground_sets[i], ground_sets[j])))
+        out.append((f"{labels[i]}|{labels[j]}", _set_distance(ground_sets[i], ground_sets[j]),
+                    left is None or (left[i] and not left[j] and _side_by_side(ground_sets[i], ground_sets[j]))))
     if edge is not None and len(ground_sets):
         side = "left" if np.median(edge[:, 0]) < np.median(ground_sets[order[0]][:, 0]) else "right"
         k = order[0] if side == "left" else order[-1]
         out.append((f"edge|{labels[k]}" if side == "left" else f"{labels[k]}|edge",
-                    _line_distance(ground_sets[k], edge)))
+                    _line_distance(ground_sets[k], edge),
+                    left is None or ((not left[k]) if side == "left" else left[k])))
     return out
+
+
+def _widest(passages) -> int | None:
+    """Index of the widest passage on the line of travel, or None when none spans it."""
+    ahead = [k for k, p in enumerate(passages) if p[2]]
+    return max(ahead, key=lambda k: passages[k][1]) if ahead else None
+
+
+def _gaps_out(passages) -> list[dict]:
+    return [{"between": lab, "cm": round(d, 1), "ahead": a} for lab, d, a in passages]
+
+
+NONE_AHEAD = ("no gap between the outlined barriers lies straight ahead of the camera, so there is no width to measure: "
+              "film facing the gap you want to pass, with both sides of it in view")
 
 
 def _unknown(why: str, **detail) -> dict:
@@ -296,15 +335,17 @@ def middle_phrase(verdict: str, lo: float, hi: float, wheelchair_cm: float, need
 def measure_gap(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
                 wheelchair_cm: float = DEFAULT_WHEELCHAIR_CM, clearance_cm: float = DEFAULT_CLEARANCE_CM,
                 walkway_edge=None, corner_px: float = 3.0, contact_px: float = 1.0,
-                n_draws: int = 400, seed: int = 0) -> dict:
-    """Clear gap between barriers on the ground plane, with a Monte Carlo band and a verdict. See module docstring."""
+                n_draws: int = 400, seed: int = 0, ahead_only: bool = True) -> dict:
+    """Clear gap between barriers on the ground plane, with a Monte Carlo band and a verdict. See module docstring.
+    ahead_only=False measures between the masks wherever they sit (scripts/eval_public.py: two annotated ends of a known
+    length, not a passage the camera faces)."""
     W, Hpx = int(frame_size[0]), int(frame_size[1])
     if not ground_ref:
         return _unknown("no ground reference: a gap in centimetres needs a rectangle of known size on the ground")
     if ground_ref.get("kind") == "camera_pose":
         return measure_gap_pose(ground_ref, barrier_masks, frame_size, wheelchair_cm=wheelchair_cm,
                                 clearance_cm=clearance_cm, walkway_edge=walkway_edge, contact_px=contact_px,
-                                n_draws=n_draws, seed=seed)
+                                n_draws=n_draws, seed=seed, ahead_only=ahead_only)
     if ground_ref.get("kind") == "tactile_strip":
         return measure_gap_strip(ground_ref, barrier_masks, frame_size, wheelchair_cm=wheelchair_cm,
                                  clearance_cm=clearance_cm, walkway_edge=walkway_edge, contact_px=contact_px,
@@ -368,7 +409,7 @@ def measure_gap(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
             e, ok = _to_ground(Hm, edge)
             if not ok.all():
                 return None
-        return _passages(grounds, e, labels)
+        return _passages(grounds, e, labels, left)
 
     # Column bottoms above the ground horizon belong to raised parts (a top that leans out past the base); drop them.
     dropped = 0
@@ -379,8 +420,11 @@ def measure_gap(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
     if any(len(s) == 0 for s in contacts) or (edge_img is not None and not _to_ground(H, edge_img)[1].all()):
         return _unknown("barrier contact points lie above the reference plane's horizon: homography ill-conditioned "
                         "for this view (reference tilted or not on the same ground)", ref_px=corners.tolist())
+    left = _left_of_centre(contacts, W) if ahead_only else None
     nominal = run(H, contacts, edge_img)
-    best = int(np.argmax([d for _, d in nominal]))
+    best = _widest(nominal)
+    if best is None:
+        return _unknown(NONE_AHEAD, gaps=_gaps_out(nominal))
     gap = nominal[best][1]
     gap_px = _gap_ends_px(nominal[best][0], contacts, labels, edge_img, lambda pts: _to_ground(H, pts)[0])
 
@@ -413,7 +457,7 @@ def measure_gap(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
                + middle_phrase(verdict, lo, hi, wheelchair_cm, need))
     return {
         "gap_cm": round(gap, 1), "band_cm": [round(lo, 1), round(hi, 1)], "verdict": verdict, "why": why,
-        "detail": {"gaps": [{"between": lab, "cm": round(d, 1)} for lab, d in nominal], "chosen": nominal[best][0],
+        "detail": {"gaps": _gaps_out(nominal), "chosen": nominal[best][0],
                    "gap_px": gap_px,
                    "ref_px": corners.round(2).tolist(), "ref_cm": [across, along], "ref_min_side_px":
                    round(float(sides.min()), 1), "draws": len(draws), "bad_draws": bad,
@@ -929,7 +973,8 @@ POSE_SOURCES = ("height", "field of view", "tilt", "roll", "mask edges")
 
 def measure_gap_pose(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
                      wheelchair_cm: float = DEFAULT_WHEELCHAIR_CM, clearance_cm: float = DEFAULT_CLEARANCE_CM,
-                     walkway_edge=None, contact_px: float = 1.0, n_draws: int = 400, seed: int = 0) -> dict:
+                     walkway_edge=None, contact_px: float = 1.0, n_draws: int = 400, seed: int = 0,
+                     ahead_only: bool = True) -> dict:
     """Clear gap from the camera pose alone (no reference in the clip). See the section comment above.
 
     ground_ref: {"kind": "camera_pose", "height_m", "height_range_m", "hfov_deg", "hfov_range_deg", "pitch_deg"
@@ -1009,7 +1054,7 @@ def measure_gap_pose(ground_ref: dict, barrier_masks: list, frame_size: tuple, *
             e, ok = ray_to_ground(edge, (W, Hpx), f, pitch, roll, h)
             if not ok.all():
                 return None
-        return _passages(grounds, e, labels)
+        return _passages(grounds, e, labels, left)
 
     # nominal pose; contact columns above its horizon are raised parts (see measure_gap) and are dropped
     p_nom = pitch_for(f0, roll0, False)
@@ -1021,10 +1066,13 @@ def measure_gap_pose(ground_ref: dict, barrier_masks: list, frame_size: tuple, *
     if any(len(s) == 0 for s in contacts):
         return _unknown(f"barrier bases lie above the horizon for a camera tilted {p_nom:.1f} deg down: the tilt is "
                         "wrong or the barriers are not on the same ground", pitch_deg=round(p_nom, 2))
+    left = _left_of_centre(contacts, W) if ahead_only else None
     nominal = run(h0, f0, p_nom, roll0, contacts, edge_img)
     if nominal is None:
         return _unknown("walkway edge lies above the horizon for the nominal camera pose")
-    best = int(np.argmax([d for _, d in nominal]))
+    best = _widest(nominal)
+    if best is None:
+        return _unknown(NONE_AHEAD, gaps=_gaps_out(nominal))
     gap_px = _gap_ends_px(nominal[best][0], contacts, labels, edge_img,
                           lambda pts: ray_to_ground(pts, (W, Hpx), f0, p_nom, roll0, h0)[0])
 
@@ -1111,7 +1159,7 @@ def measure_gap_pose(ground_ref: dict, barrier_masks: list, frame_size: tuple, *
         lines_out = {"used": False, "why": line_note, "skipped": n_skipped}
     return {
         "gap_cm": round(gap, 1), "band_cm": [round(lo, 1), round(hi, 1)], "verdict": verdict, "why": why,
-        "detail": {"mode": "camera_pose", "gaps": [{"between": lab, "cm": round(d, 1)} for lab, d in nominal],
+        "detail": {"mode": "camera_pose", "gaps": _gaps_out(nominal),
                    "chosen": nominal[best][0], "gap_px": gap_px, "pose": pose_out, "ground_lines": lines_out,
                    "error_sources_cm": {k: round(v, 1) for k, v in sens.items()}, "dominant_error": dominant,
                    "draws": len(draws), "bad_draws": bad, "dropped_contacts": dropped,

@@ -397,7 +397,7 @@
     return `${head}${faces}${cost}`;
   }
 
-  const sampleBtns = [$('#sample-btn'), $('#sample-closed-btn')];
+  const sampleBtns = [$('#sample-btn'), $('#sample-closed-btn'), $('#sample-known-btn')];
   sampleBtns.forEach((btn) => btn.addEventListener('click', async () => {
     const at = crosshairLatLng();
     if (params.get('verdict')) { await runSample(false, at); return; }  // hand-made UI fixture variants

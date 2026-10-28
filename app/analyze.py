@@ -45,7 +45,8 @@ SAMPLE_FALLBACK = ROOT / "data" / "fixtures" / "analyze" / "sample-scooters-row.
 SAMPLE_FALLBACK_SHA = "69bee8c8ddaaabb410898f49f41c998200fbbef5ef97c35b56db09bba20cef19"  # scooters-row, first 3 s
 # recorded live runs with their blurred clips; the first is the default sample
 DEMO_RUNS = {"scooters": ROOT / "static" / "demo" / "scooters-city-live.json",
-             "closed": ROOT / "static" / "demo" / "sidewalk-closed-live.json"}
+             "closed": ROOT / "static" / "demo" / "sidewalk-closed-live.json",
+             "known": ROOT / "static" / "demo" / "sanpo-corridor-live.json"}  # camera height and tilt known (SANPO)
 
 MAX_SECONDS = 10
 FPS = 10
