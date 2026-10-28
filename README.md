@@ -38,15 +38,15 @@ Every result is labelled *Estimated with default assumptions*, *Calibrated* or *
 
 Numbers below come from files in this repo. Samples are small and labelled as such.
 
-**Public photos with a known width** (`data/eval/`, `scripts/eval_public.py`, no model calls; three images, a smoke test, not a benchmark):
+**Public photos with a known length on the ground** (`data/eval/`, `scripts/eval_public.py`, no model calls; three images, a smoke test, not a benchmark). Each cell is the 95% range; ✓ means it contains the true value:
 
-| Photo | True width | Default (seated) | Camera height and lens known | Plus tilt |
+| Photo | What is known | Default (seated) | Camera height and lens known | Plus tilt |
 |---|---|---|---|---|
-| Graz, Kronesgasse (CC0) | 85 cm | unknown, 20–124 | unknown, 40–234 | unknown, 55–137 |
-| Teltow, 1 m ruler (CC BY 3.0) | 100 cm | **blocked, 37–57 (wrong)** | tight, 74–124 | tight, 75–112 |
-| Altenplathow bridge (CC BY-SA 4.0) | 230 cm | unknown, 64–420 | passes, 88–930 | — |
+| Graz, Kronesgasse (CC0) | clear width 85 cm, kerb edge to wall base | 20–124 ✓ | 40–234 ✓ | 55–137 ✓ |
+| Teltow (CC BY 3.0) | a 1 m folding ruler lying across the path | **37–57 ✗** | 74–124 ✓ | 75–112 ✓ |
+| Altenplathow bridge (CC BY-SA 4.0) | path width 230 cm between parapets | 64–420 ✓ | 88–930 ✓ | — |
 
-These photos were taken standing, so the seated default is the wrong assumption for them; in the app, Muse Spark's `seated_height` check rejects such clips. Camera heights in the middle columns are guesses from the viewpoint, and the "tilt" column takes the tilt from lines on the ground (not an independent sensor). The point they make: with default assumptions the app can be confidently wrong, which is why a pass needs confirmation and why calibration matters.
+The ranges are honest but wide, so the verdicts here are mostly "unknown". These photos were taken standing, so the seated default is the wrong assumption for them (in the app, Muse Spark's `seated_height` check rejects such clips); camera heights in the middle columns are guesses from the viewpoint; the "tilt" column takes the tilt from lines on the ground, not from an independent sensor. The Teltow row is the point: with default assumptions the app can be confidently wrong about scale, which is why a pass needs confirmation and why calibration matters.
 
 **Recorded live runs** (`static/demo/*.json`, Pexels clips, first 10 s):
 

@@ -171,7 +171,10 @@ async def api_analyze_stream(
             yield json.dumps(ev, ensure_ascii=False) + "\n"
         await task
 
-    return StreamingResponse(lines(), media_type="application/x-ndjson")
+    # text/event-stream + no-transform: a compressing proxy (Modal's edge answers browsers with zstd) would otherwise
+    # hold every line until the end, and the page would see all stages finish at once. Lines are plain JSON.
+    return StreamingResponse(lines(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
 
 
 @app.get("/api/analyze/clip/{job}")

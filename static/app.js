@@ -301,7 +301,7 @@
 
   // Live check as a stream of stage events (POST /api/analyze/stream), shown in the #stages list as they happen.
   const STAGE_INFO = {
-    blur: (e) => (e.faces == null ? '' : `${e.faces} face${e.faces === 1 ? '' : 's'} blurred in ${e.frames} frames`),
+    blur: (e) => (e.faces == null ? '' : `${e.faces} face detection${e.faces === 1 ? '' : 's'} blurred in ${e.frames} frames`),
     triage: (e) => [e.usable === false ? 'clip not usable' : '', e.path ? `path ${e.path}` : '', (e.barriers || []).join(', ')].filter(Boolean).join(' · '),
     sam: (e) => Object.entries(e.outlined || {}).map(([c, n]) => `${c} ${n} frames`).join(', '),
     measure: (e) => [e.verdict, e.mode].filter(Boolean).join(' · '),
@@ -390,7 +390,7 @@
 
   function statusLine(r) {
     const b = r.blur || {};
-    const faces = b.faces == null ? '' : ` Faces blurred before upload: ${b.faces} in ${b.frames_with_faces} of ${b.frames} frames.`;
+    const faces = b.faces == null ? '' : ` Face detections blurred before upload: ${b.faces} in ${b.frames_with_faces} of ${b.frames} frames.`;
     const cost = r.cost ? ` ${r.recorded ? 'SAM frames billed when it was recorded' : 'Paid SAM frames this check'}: ${r.cost.sam_frames} ($${Number(r.cost.usd_estimate || 0).toFixed(2)}).` : '';
     const head = r.recorded ? `${r.recorded.about ? `${r.recorded.about} ` : ''}Recorded live run (${r.models.triage} and ${r.models.sam} on the Meta Model API, ${r.recorded.at.slice(0, 10)}), replayed with no model calls now.`
       : r.sample ? 'Sample clip, replayed results (no live model calls).' : 'Done.';
