@@ -39,6 +39,7 @@ META_SPARK_MODEL = "muse-spark-1.3"
 TRIAGE_EFFORT = "low"
 EXPLAIN_EFFORT = "low"
 MAX_TOKENS = 4000  # reasoning counts against this; Spark Open needs >= 2000
+RETRY_MAX_TOKENS = 8000  # a retry after a cut-off or empty reply gets more room
 TIMEOUT_S = 180
 
 
@@ -108,9 +109,18 @@ def _backend() -> Backend:
     return replay
 
 
-async def _chat(b: Backend, messages: list[dict], schema: dict | None, effort: str) -> dict:
+def _retry_turns(content: str, note: str) -> list[dict]:
+    """Follow-up turns after a bad reply. An empty assistant turn is never sent: the Meta Model API answers it with
+    404 model_not_found (reproduced 2026-10-28), which reads like a missing model. An empty reply happens when
+    reasoning uses up the token limit, so the retry also gets a larger limit (see RETRY_MAX_TOKENS)."""
+    return ([{"role": "assistant", "content": content}] if content.strip() else []) + [{"role": "user", "content": note}]
+
+
+async def _chat(b: Backend, messages: list[dict], schema: dict | None, effort: str,
+                max_tokens: int = 0) -> dict:
     """One chat completion. Returns {"content", "model", "usage", "latency_s", "finish"}."""
-    body: dict = {"model": b.model, "messages": messages, b.max_tokens_field: MAX_TOKENS, "reasoning_effort": effort}
+    body: dict = {"model": b.model, "messages": messages, b.max_tokens_field: max_tokens or MAX_TOKENS,
+                  "reasoning_effort": effort}
     if schema is not None:
         body["response_format"] = {"type": "json_schema",
                                    "json_schema": {"name": schema["title"], "schema": schema["schema"], "strict": True}}
@@ -357,7 +367,7 @@ async def triage(frames_jpeg: list[bytes], meta: dict) -> dict:
         calls: list[dict] = []
         warnings: list[str] = []
         for attempt in range(2):
-            c = await _chat(b, messages, TRIAGE_SCHEMA, TRIAGE_EFFORT)
+            c = await _chat(b, messages, TRIAGE_SCHEMA, TRIAGE_EFFORT, RETRY_MAX_TOKENS if attempt else MAX_TOKENS)
             calls.append(c)
             clean, errors, dist_errors = _validate_triage(_parse_json(c["content"]), n)
             if c["finish"] == "length":
@@ -365,10 +375,9 @@ async def triage(frames_jpeg: list[bytes], meta: dict) -> dict:
             if not errors and not dist_errors:
                 break
             if attempt == 0:
-                messages = messages + [
-                    {"role": "assistant", "content": c["content"]},
-                    {"role": "user", "content": "That reply was invalid: " + "; ".join(errors + dist_errors)
-                     + ". Reply again with only the corrected JSON object."}]
+                messages = messages + _retry_turns(
+                    c["content"], "That reply was invalid: " + "; ".join(errors + dist_errors)
+                    + ". Reply again with only the corrected JSON object.")
         if errors:
             raise SparkError("triage output invalid twice: " + "; ".join(errors))
         if dist_errors:
@@ -465,7 +474,7 @@ async def explain(measurement: dict) -> dict:
     warnings: list[str] = []
     text, used_template = "", False
     for attempt in range(2):
-        c = await _chat(b, messages, None, EXPLAIN_EFFORT)
+        c = await _chat(b, messages, None, EXPLAIN_EFFORT, RETRY_MAX_TOKENS if attempt else MAX_TOKENS)
         calls.append(c)
         text = " ".join(c["content"].split())
         problems = [f"the number {m} is not in the measurement" for m in _foreign_numbers(text, measurement)]
@@ -475,10 +484,10 @@ async def explain(measurement: dict) -> dict:
             break
         warnings.extend(problems)
         if attempt == 0:
-            messages = messages + [
-                {"role": "assistant", "content": c["content"]},
-                {"role": "user", "content": "Not allowed: " + "; ".join(problems)
-                 + ". Rewrite using only numbers from the measurement JSON."}]
+            messages = messages + _retry_turns(
+                c["content"], ("Not allowed: " + "; ".join(problems)
+                               + ". Rewrite using only numbers from the measurement JSON.") if text else
+                "Your reply was empty. Reply with one or two plain sentences as instructed.")
     else:
         text, used_template = _template(measurement), True
     result = {"text": text, "model": "template" if used_template else calls[-1]["model"], "warnings": warnings,

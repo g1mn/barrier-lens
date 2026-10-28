@@ -365,3 +365,26 @@ def test_blur_tiles_cover_the_frame_and_bound_the_detector_input():
 def test_blur_dedupe_keeps_one_box_per_face():
     face, same_face_from_a_tile, other = (100, 100, 140, 150), (102, 101, 139, 149), (400, 100, 430, 140)
     assert sorted(blur.dedupe([face, same_face_from_a_tile, other])) == sorted([face, other])
+
+
+def test_spark_retry_never_sends_an_empty_assistant_turn(monkeypatch):
+    """Meta answers an empty assistant turn with 404 model_not_found; a cut-off empty reply must be retried without
+    it, and with a larger token limit."""
+    assert spark._retry_turns("", "again") == [{"role": "user", "content": "again"}]
+    assert spark._retry_turns("{}", "again")[0] == {"role": "assistant", "content": "{}"}
+    seen = []
+
+    async def fake_chat(b, messages, schema, effort, max_tokens=0):
+        seen.append((messages, max_tokens))
+        if len(seen) == 1:
+            return {"content": "", "finish": "length", "model": "m", "latency_s": 0.1, "usage": {}}
+        return {"content": "Your wheelchair should fit through here.", "finish": "stop", "model": "m",
+                "latency_s": 0.1, "usage": {}}
+    monkeypatch.setattr(spark, "_chat", fake_chat)
+    monkeypatch.setattr(spark, "_backend", lambda: spark.Backend("meta", "u", "m", "k", "max_completion_tokens"))
+    monkeypatch.setattr(spark, "_cache_put", lambda *a: None)
+    out = asyncio.run(spark.explain({"verdict": "passes", "gap_cm": 95.0, "band_cm": [90.0, 99.0]}))
+    assert out["text"].startswith("Your wheelchair") and len(seen) == 2
+    retry_msgs, retry_tokens = seen[1]
+    assert all(m.get("content") for m in retry_msgs if m["role"] == "assistant")
+    assert retry_tokens == spark.RETRY_MAX_TOKENS
