@@ -142,6 +142,13 @@
               <input type="password" id="demo-token" autocomplete="off" spellcheck="false">
             </p>
             <p class="status" id="check-status" role="status" aria-live="polite"></p>
+            <ol class="stages" id="stages" hidden aria-label="Live check progress">
+              <li data-stage="blur"><b>Blur faces</b> on this server, before anything leaves it <span class="st"></span></li>
+              <li data-stage="triage"><b>Muse Spark</b> checks the clip and names the barriers <span class="st"></span></li>
+              <li data-stage="sam"><b>SAM 3.1</b> outlines each barrier through the clip <span class="st"></span></li>
+              <li data-stage="measure"><b>Geometry</b> measures the gap and its error range <span class="st"></span></li>
+              <li data-stage="explain"><b>Muse Spark</b> explains it; numbers checked against the measurement <span class="st"></span></li>
+            </ol>
           </li>
         </ol>
 

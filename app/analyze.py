@@ -394,7 +394,7 @@ UNKNOWN_EXPLANATION = ("We could not measure this gap, so we cannot say whether 
 async def analyze(video_path: str | Path, lat: float | None, lon: float | None, replay: bool = False, *,
                   concepts_hint: list[str] | None = None, fixture_sha: str | None = None,
                   require_seated_height: bool = True, sample: bool = False, profile: dict | None = None,
-                  sensor: dict | None = None) -> dict:
+                  sensor: dict | None = None, progress=None) -> dict:
     """Run the whole check on one clip. See the module docstring.
 
     profile: the user's calibration profile (app.calibration.clean_profile fields: chair width, armrest height,
@@ -406,7 +406,13 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
     fixture_sha: replay SAM fixtures recorded for this source-clip hash when the blurred clip has none.
     Raises AnalyzeError for unreadable video, SpendCapError over the cap, blur.BlurError when faces cannot be
     blurred, spark.SparkError when live triage fails.
+    progress: optional callable taking one dict {"stage", "status": "start"|"done", ...} at each stage boundary
+    (blur, triage, sam, measure, explain) — what the page shows while a live check runs.
     """
+    def step(stage: str, status: str, **kw) -> None:
+        if progress:
+            progress({"stage": stage, "status": status, **kw})
+
     t0 = time.monotonic()
     timings: dict[str, float] = {}
     replay = bool(replay or not key("META_API_KEY"))
@@ -417,9 +423,11 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
     prof = calibration.clean_profile(profile)
     hints = await calibration.clip_hints(src)
     chair_cm, chair_src = calibration.chair_width_cm(prof, geometry.DEFAULT_WHEELCHAIR_CM)
+    step("blur", "start")
     clip, blur_counts, job = await prepare(src)
     info = clip_info(clip)
     timings["prepare_s"] = round(time.monotonic() - t0, 2)
+    step("blur", "done", s=timings["prepare_s"], faces=blur_counts.get("faces"), frames=blur_counts.get("frames"))
     base = {"job": job, "replay": replay, "sample": sample, "location": {"lat": lat, "lon": lon},
             "frame_size": [info["width"], info["height"]], "fps": info["fps"], "n_frames": info["frames"],
             "video_url": f"/api/analyze/clip/{job}", "blur": blur_counts}
@@ -427,6 +435,7 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
 
     # triage
     t = time.monotonic()
+    step("triage", "start")
     jpgs, meta = triage_frames(clip, info["frames"])
     meta["require_seated_height"] = require_seated_height
     try:
@@ -443,6 +452,8 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
             notes.append("Muse Spark triage had no cached answer for these frames; sample concepts were used instead.")
     tri["frames_sent"] = meta["frame_indices"]
     timings["triage_s"] = round(time.monotonic() - t, 2)
+    step("triage", "done", s=timings["triage_s"], usable=tri.get("usable"),
+         path=(tri.get("path") or {}).get("state"), barriers=[b["concept"] for b in tri.get("barriers") or []])
     models = {"triage": tri.get("model"), "sam": sam.MODEL, "explain": None, "blur": blur_counts.get("detector")}
 
     if tri.get("usable") is False or not tri.get("barriers"):
@@ -463,6 +474,7 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
             barriers.append(c)
     barriers = barriers[:MAX_BARRIERS]
     ref_concept = "paper" if (tri.get("reference") or {}).get("visible") else "tactile paving"
+    step("sam", "start", concepts=[*barriers, ref_concept])
     results = await asyncio.gather(*[_segment(clip, c, info["frames"], replay, fixture_sha)
                                      for c in [*barriers, ref_concept]])
     size = (info["width"], info["height"])
@@ -472,6 +484,8 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
                for r in results]
     bar_results, ref_result = list(results[:-1]), results[-1]
     timings["sam_s"] = round(time.monotonic() - t, 2)
+    step("sam", "done", s=timings["sam_s"],
+         outlined={r.get("concept"): sum(1 for f in r.get("frames") or [] if f.get("objects")) for r in results})
     sam_frames = sum(int(r.get("frames_billed") or 0) for r in results
                      if r.get("source") == "meta-api" and r.get("cache") != "hit")
     for r in results:
@@ -482,6 +496,7 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
 
     # geometry
     t = time.monotonic()
+    step("measure", "start")
     merged = merge_barriers(bar_results)
     pose = calibration.camera_pose(prof, sensor, hints, size)
     mode = "reference" if ref_result.get("frames") else pose["source"]
@@ -502,6 +517,7 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
             m.setdefault("detail", {})["reference"] = {"concept": ref_concept, **ref_kind(ref_concept)}
     m = apply_path_and_mode(m, tri, mode)
     timings["measure_s"] = round(time.monotonic() - t, 2)
+    step("measure", "done", s=timings["measure_s"], verdict=m.get("verdict"), mode=mode)
     assumptions = {"mode": mode, "label": calibration.LABELS[mode], "chair_width_cm": chair_cm,
                    "chair_source": chair_src, "pose": None if mode == "reference" else pose, "clip_hints": hints,
                    "main": calibration.assumption_text(mode, pose, chair_cm, chair_src, ref_concept)}
@@ -515,6 +531,7 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
 
     # explanation
     t = time.monotonic()
+    step("explain", "start")
     ex_in = {k: m.get(k) for k in ("gap_cm", "band_cm", "verdict", "why")}
     ex_in.update({"chair_width_cm": chair_cm, "barrier": ", ".join(barriers) or None})
     cause = unknown_cause(m)
@@ -530,6 +547,7 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
         ex = {**ex, "text": UNKNOWN_EXPLANATION}
     models["explain"] = ex.get("model")
     timings["explain_s"] = round(time.monotonic() - t, 2)
+    step("explain", "done", s=timings["explain_s"], model=ex.get("model"))
 
     masks = [mask_track(r, "barrier") for r in bar_results] + [mask_track(ref_result, "reference")]
     timings["total_s"] = round(time.monotonic() - t0, 2)

@@ -317,3 +317,14 @@ input[type="file"]::file-selector-button {
 .saw .miss { color: var(--warn); font-weight: 600; }
 .how { margin: 6px 0 10px; }
 .how summary { cursor: pointer; font-size: .88rem; color: var(--muted); }
+
+/* live check progress: real stage events from the server */
+.stages { margin: 6px 0 0; padding-left: 20px; font-size: .9rem; }
+.stages li { margin: 3px 0; color: var(--muted); }
+.stages li[data-state="run"] { color: var(--text); }
+.stages li[data-state="run"]::marker { content: "◌  "; }
+.stages li[data-state="done"] { color: var(--text); }
+.stages li[data-state="done"]::marker { content: "✓  "; color: var(--ok); }
+.stages .st { color: var(--muted); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: no-preference) { .stages li[data-state="run"] b { animation: pulse 1.2s ease-in-out infinite; } }
+@keyframes pulse { 50% { opacity: .45; } }

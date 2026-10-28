@@ -114,6 +114,66 @@ async def api_analyze(
         tmp.unlink(missing_ok=True)  # the original upload is unblurred; keep only the blurred clip
 
 
+@app.post("/api/analyze/stream")
+async def api_analyze_stream(
+    video: UploadFile = File(...),
+    lat: float = Form(..., ge=-90, le=90),
+    lon: float = Form(..., ge=-180, le=180),
+    profile: str | None = Form(None),
+    sensor: str | None = Form(None),
+    x_demo_token: str | None = Header(None),
+):
+    """The live check as NDJSON lines: {"stage", "status", ...} at each stage boundary, then {"result": ...} or
+    {"error", "status"}. Same work and guards as POST /api/analyze; the page uses it to show real progress."""
+    import asyncio
+    import json
+    from fastapi.responses import StreamingResponse
+
+    require_live_token(x_demo_token)
+    up_dir = _analyze.WORK_DIR / "uploads"
+    up_dir.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(suffix=Path(video.filename or "").suffix.lower()[:8] or ".mp4", dir=up_dir)
+    tmp = Path(name)
+    size = 0
+    try:
+        with open(fd, "wb") as f:
+            while chunk := await video.read(1 << 20):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, "clip too large (200 MB max); 10 seconds is enough")
+                f.write(chunk)
+        if size == 0:
+            raise HTTPException(400, "empty upload")
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    q: asyncio.Queue = asyncio.Queue()
+    errors = ((_analyze.AnalyzeError, 422, ""), (_analyze.SpendCapError, 429, ""),
+              (_blur.BlurError, 503, "faces could not be blurred, so nothing was sent: "),
+              ((_spark.SparkError, _analyze.sam.SamError), 502, "model call failed: "))
+
+    async def run() -> None:
+        try:
+            res = await _analyze.analyze(tmp, lat, lon, profile=_cal.parse_json(profile),
+                                         sensor=_cal.parse_json(sensor), progress=q.put_nowait)
+            q.put_nowait({"result": res})
+        except Exception as e:  # mapped like POST /api/analyze; anything else is a 500
+            code, prefix = next(((c, p) for t, c, p in errors if isinstance(e, t)), (500, "internal error: "))
+            q.put_nowait({"error": prefix + str(e)[:300], "status": code})
+        finally:
+            tmp.unlink(missing_ok=True)  # the original upload is unblurred; keep only the blurred clip
+            q.put_nowait(None)
+
+    task = asyncio.create_task(run())
+
+    async def lines():
+        while (ev := await q.get()) is not None:
+            yield json.dumps(ev, ensure_ascii=False) + "\n"
+        await task
+
+    return StreamingResponse(lines(), media_type="application/x-ndjson")
+
+
 @app.get("/api/analyze/clip/{job}")
 def api_analyze_clip(job: str) -> FileResponse:
     """The normalised, face-blurred clip an analysis ran on (what the masks refer to)."""

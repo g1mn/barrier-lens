@@ -445,3 +445,22 @@ def test_named_recorded_samples(env):
     s = c.get("/api/sample", params={"name": "scooters"}).json()
     assert len(s["measurement_detail"]["gap_px"]) == 2 and s["recorded"]["name"] == "scooters"
     assert c.get("/api/sample", params={"name": "nope"}).status_code == 404
+
+
+def test_stream_reports_each_stage_then_the_result(env, scene, clip_src, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    _write_sam_fixture(env / "fixtures", "bollard", scene["barrier_masks"], scene["frame_size"])
+    _write_sam_fixture(env / "fixtures", "paper", [scene["ref_mask"]], scene["frame_size"])
+    asyncio.run(_seed_triage(clip_src))
+    monkeypatch.setenv("BL_DEMO_TOKEN", "judge-secret")
+    c = TestClient(app)
+    files = {"video": ("c.mp4", clip_src.read_bytes(), "video/mp4")}
+    assert c.post("/api/analyze/stream", files=files, data={"lat": "37.48", "lon": "127.03"}).status_code == 401
+    r = c.post("/api/analyze/stream", files=files, data={"lat": "37.48", "lon": "127.03"},
+               headers={"X-Demo-Token": "judge-secret"})
+    events = [json.loads(line) for line in r.text.splitlines() if line.strip()]
+    stages = [(e["stage"], e["status"]) for e in events if "stage" in e]
+    assert stages == [(s, st) for s in ("blur", "triage", "sam", "measure", "explain") for st in ("start", "done")]
+    assert events[-1]["result"]["verdict"] == "passes"
+    assert next(e for e in events if e.get("stage") == "sam" and e["status"] == "done")["outlined"]["bollard"] > 0

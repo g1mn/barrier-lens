@@ -288,8 +288,8 @@
     const s = tilt.read(f);
     if (s) fd.append('sensor', JSON.stringify(s));
     $('#analyze-btn').disabled = true;
-    setStatus('Blurring faces on this server, then measuring… this can take a minute.');
-    const result = await getJson('/api/analyze', { method: 'POST', body: fd, headers: liveHeaders() });
+    setStatus('Measuring… this takes about a minute. Each step below shows when it finishes.');
+    const result = await streamCheck(fd);
     $('#analyze-btn').disabled = false;
     if (result) {
       useClip(result.video_url);
@@ -297,6 +297,67 @@
       setStatus(statusLine(result));
     }
   });
+
+
+  // Live check as a stream of stage events (POST /api/analyze/stream), shown in the #stages list as they happen.
+  const STAGE_INFO = {
+    blur: (e) => (e.faces == null ? '' : `${e.faces} face${e.faces === 1 ? '' : 's'} blurred in ${e.frames} frames`),
+    triage: (e) => [e.usable === false ? 'clip not usable' : '', e.path ? `path ${e.path}` : '', (e.barriers || []).join(', ')].filter(Boolean).join(' · '),
+    sam: (e) => Object.entries(e.outlined || {}).map(([c, n]) => `${c} ${n} frames`).join(', '),
+    measure: (e) => [e.verdict, e.mode].filter(Boolean).join(' · '),
+    explain: (e) => (e.model === 'template' ? 'fixed sentence (model text failed a check)' : ''),
+  };
+  function stageReset() {
+    const ol = $('#stages');
+    ol.hidden = false;
+    ol.querySelectorAll('li').forEach((li) => { li.dataset.state = 'todo'; li.querySelector('.st').textContent = ''; });
+  }
+  function stageEvent(e) {
+    const li = $(`#stages li[data-stage="${e.stage}"]`);
+    if (!li) return;
+    li.dataset.state = e.status === 'start' ? 'run' : 'done';
+    if (e.status === 'done') {
+      const more = (STAGE_INFO[e.stage] || (() => ''))(e);
+      li.querySelector('.st').textContent = ` — ${e.s ?? ''}s${more ? ` · ${more}` : ''}`;
+    }
+  }
+  async function streamCheck(fd) {
+    stageReset();
+    let res;
+    try {
+      res = await fetch('/api/analyze/stream', { method: 'POST', body: fd, headers: liveHeaders() });
+    } catch (e) {
+      setStatus(`Could not reach the server (${e.message}).`, true);
+      return null;
+    }
+    if (!res.ok || !res.body) {
+      let detail = '';
+      try { detail = (await res.json()).detail; } catch { /* not JSON */ }
+      setStatus(`Could not measure: ${typeof detail === 'string' && detail ? detail : `HTTP ${res.status}`}`, true);
+      return null;
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '', result = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let ev;
+        try { ev = JSON.parse(line); } catch { continue; }
+        if (ev.stage) stageEvent(ev);
+        else if (ev.result) result = ev.result;
+        else if (ev.error) { setStatus(`Could not measure: ${ev.error}`, true); return null; }
+      }
+    }
+    if (!result) setStatus('The check ended without a result. Please try again.', true);
+    return result;
+  }
 
   // GET/POST JSON; on failure, says why in the status line and returns null.
   async function getJson(url, opts) {
@@ -352,6 +413,7 @@
     if (!result) return;
     clip.value = '';
     $('#analyze-btn').disabled = true;
+    $('#stages').hidden = true;
     resetResult();
     useClip(result.video_url);
     if (!result.video_url) { canvas.width = result.frame_size[0]; canvas.height = result.frame_size[1]; }
