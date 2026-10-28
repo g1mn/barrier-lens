@@ -1,0 +1,416 @@
+"""Fetch the Seoul open data the Yangjae Station demo needs and cache it under data/seoul/.
+
+Sources (Korea Open Government License Type 1 / 공공누리 1유형, see data/seoul/ATTRIBUTION.txt):
+  aiTbAutoKickboard  OA-23057  e-scooter towing history (lot-number address only, no coordinates)
+  SeoulMetroFaciInfo OA-15994  live elevator / escalator status, Seoul Metro stations
+  tbTraficElvtr      OA-21212  elevator positions around subway stations (WGS84, 2020 data)
+  tbTraficEntrcLft   OA-21211  wheelchair lift positions at station entrances (WGS84, 2020 data)
+Geocoding goes through the VWorld address API, one request at a time, 1.5 s apart, and every
+answer is appended to a cache file the moment it arrives (VWorld blocks a key after ~10k calls/day).
+
+Steps (run in this order; each one resumes from its cache):
+  .venv/bin/python scripts/fetch_seoul.py towing           page the whole towing table once, keep Seocho-gu + Gangnam-gu
+  .venv/bin/python scripts/fetch_seoul.py geocode [--max N] geocode addresses in the target dongs
+  .venv/bin/python scripts/fetch_seoul.py station          Yangjae elevators, lifts and live status
+  .venv/bin/python scripts/fetch_seoul.py exits            exit / elevator positions from OpenStreetMap (one Overpass call)
+  .venv/bin/python scripts/fetch_seoul.py build            write data/seoul/towing-yangjae.json
+  .venv/bin/python scripts/fetch_seoul.py stats            counts only, no network
+Keys are read through app.config.key() and are never printed: every error message is redacted.
+"""
+from __future__ import annotations
+
+import argparse
+import collections
+import json
+import math
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+import httpx
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from app.config import key  # noqa: E402
+
+SEOUL_DIR = ROOT / "data" / "seoul"          # small, committed
+CACHE_DIR = ROOT / "data" / "cache" / "seoul"  # large, gitignored
+TOW_ROWS = CACHE_DIR / "towing-rows.jsonl"
+TOW_PROGRESS = CACHE_DIR / "towing-progress.jsonl"
+GEOCODE_CACHE = SEOUL_DIR / "geocode-vworld.jsonl"
+TOW_OUT = SEOUL_DIR / "towing-yangjae.json"
+STATION_OUT = SEOUL_DIR / "yangjae-station.json"
+
+SEOUL_BASE = "http://openapi.seoul.go.kr:8088"
+VWORLD_URL = "https://api.vworld.kr/req/address"
+PAGE = 1000            # Seoul Open API maximum rows per call
+KEEP_GU = {"서초구", "강남구"}
+# Dongs that touch a 1 km circle around Yangjae Station. Only these get geocoded.
+TARGET_DONGS = ("서울특별시 서초구 양재동", "서울특별시 강남구 도곡동", "서울특별시 서초구 서초동",
+                "서울특별시 강남구 개포동")
+BUILD_RADIUS_M = 1000
+VWORLD_GAP_S = 1.5
+
+
+def _secrets() -> list[str]:
+    return [v for v in (key("SEOUL_OPEN_DATA_KEY"), key("VWORLD_API_KEY")) if v]
+
+
+def redact(text: object) -> str:
+    s = str(text)
+    for v in _secrets():
+        s = s.replace(v, "<key>")
+    return s
+
+
+def log(*parts: object) -> None:
+    print(redact(" ".join(str(p) for p in parts)), flush=True)
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371008.8
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp, dl = p2 - p1, math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+# ---------------------------------------------------------------- Seoul Open API
+
+def seoul_page(client: httpx.Client, service: str, start: int, end: int) -> dict:
+    k = key("SEOUL_OPEN_DATA_KEY")
+    if not k:
+        raise SystemExit("SEOUL_OPEN_DATA_KEY is not set (~/.config/barrier-lens/.env)")
+    url = f"{SEOUL_BASE}/{k}/json/{service}/{start}/{end}/"
+    last = None
+    for attempt in range(4):
+        try:
+            r = client.get(url, timeout=60)
+            r.raise_for_status()
+            d = r.json()
+            if service not in d:
+                res = d.get("RESULT", {})
+                raise RuntimeError(f"{service} {start}-{end}: {res.get('CODE')} {res.get('MESSAGE')}")
+            return d[service]
+        except Exception as e:  # noqa: BLE001
+            last = e
+            log(f"  retry {attempt + 1} {service} {start}-{end}: {redact(repr(e))[:200]}")
+            time.sleep(5 * (attempt + 1))
+    raise SystemExit(f"giving up on {service} {start}-{end}: {redact(repr(last))[:200]}")
+
+
+def seoul_all(client: httpx.Client, service: str) -> list[dict]:
+    first = seoul_page(client, service, 1, PAGE)
+    rows, total = list(first.get("row", [])), int(first["list_total_count"])
+    for start in range(PAGE + 1, total + 1, PAGE):
+        rows += seoul_page(client, service, start, start + PAGE - 1).get("row", [])
+        time.sleep(0.3)
+    return rows
+
+
+def cmd_towing(_args: argparse.Namespace) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    done: set[int] = set()
+    if TOW_PROGRESS.exists():
+        for line in TOW_PROGRESS.read_text().splitlines():
+            done.add(json.loads(line)["start"])
+    with httpx.Client() as client:
+        head = seoul_page(client, "aiTbAutoKickboard", 1, 1)
+        total = int(head["list_total_count"])
+        starts = [s for s in range(1, total + 1, PAGE) if s not in done]
+        log(f"towing: list_total_count={total}, pages left={len(starts)} of {math.ceil(total / PAGE)}")
+        with TOW_ROWS.open("a") as rows_f, TOW_PROGRESS.open("a") as prog_f:
+            for n, start in enumerate(starts, 1):
+                page = seoul_page(client, "aiTbAutoKickboard", start, start + PAGE - 1)
+                rows = page.get("row", [])
+                kept = [r for r in rows if r.get("GU_NM") in KEEP_GU]
+                for r in kept:
+                    rows_f.write(json.dumps(r, ensure_ascii=False) + "\n")
+                rows_f.flush()
+                prog_f.write(json.dumps({"start": start, "rows": len(rows), "kept": len(kept),
+                                         "total": int(page["list_total_count"]), "at": now_iso()}) + "\n")
+                prog_f.flush()
+                if n % 20 == 0 or n == len(starts):
+                    log(f"  page {n}/{len(starts)} start={start} rows={len(rows)} kept={len(kept)}")
+                time.sleep(0.3)
+    cmd_stats(_args)
+
+
+def load_tow_rows() -> list[dict]:
+    if not TOW_ROWS.exists():
+        return []
+    by_no: dict[str, dict] = {}
+    for line in TOW_ROWS.read_text().splitlines():
+        r = json.loads(line)
+        by_no[r["NO"]] = r  # paging can repeat a row; NO is the record id
+    return list(by_no.values())
+
+
+def in_target(addr: str) -> bool:
+    return any(addr.startswith(p + " ") for p in TARGET_DONGS)
+
+
+# ---------------------------------------------------------------- VWorld geocoding
+
+def load_geocode_cache() -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    if GEOCODE_CACHE.exists():
+        for line in GEOCODE_CACHE.read_text().splitlines():
+            if line.strip():
+                g = json.loads(line)
+                out[g["addr"]] = g
+    return out
+
+
+def vworld_geocode(client: httpx.Client, addr: str, kind: str) -> dict:
+    k = key("VWORLD_API_KEY")
+    if not k:
+        raise SystemExit("VWORLD_API_KEY is not set (~/.config/barrier-lens/.env)")
+    params = {"service": "address", "request": "getcoord", "version": "2.0", "crs": "epsg:4326",
+              "address": addr, "refine": "true", "simple": "false", "format": "json",
+              "type": kind, "key": k}
+    r = client.get(VWORLD_URL, params=params, timeout=20)
+    r.raise_for_status()
+    resp = r.json().get("response", {})
+    status = resp.get("status")
+    if status == "OK":
+        p = resp["result"]["point"]
+        return {"status": "OK", "lat": round(float(p["y"]), 7), "lon": round(float(p["x"]), 7),
+                "refined": (resp.get("refined") or {}).get("text")}
+    if status == "NOT_FOUND":
+        return {"status": "NOT_FOUND"}
+    err = resp.get("error") or {}
+    raise RuntimeError(f"vworld status={status} code={err.get('code')} {err.get('text')}")
+
+
+def cmd_geocode(args: argparse.Namespace) -> None:
+    rows = [r for r in load_tow_rows() if in_target(r["ADDR"])]
+    freq = collections.Counter(r["ADDR"].strip() for r in rows)
+    cache = load_geocode_cache()
+    todo = [a for a, _ in freq.most_common() if a not in cache]
+    log(f"geocode: {len(freq)} unique addresses in target dongs, {len(cache)} cached, {len(todo)} to do,"
+        f" this run max {args.max}")
+    calls, fails_in_row = 0, 0
+    with httpx.Client() as client, GEOCODE_CACHE.open("a") as f:
+        for addr in todo[: args.max]:
+            result = None
+            for kind in ("parcel", "road"):
+                try:
+                    calls += 1
+                    g = vworld_geocode(client, addr, kind)
+                    fails_in_row = 0
+                except Exception as e:  # noqa: BLE001
+                    fails_in_row += 1
+                    log(f"  vworld error ({fails_in_row} in a row) for {addr}: {redact(repr(e))[:160]}")
+                    if fails_in_row >= 6:
+                        log(f"  stopping: 6 failures in a row after {calls} calls; rerun later (cache keeps progress)")
+                        return
+                    time.sleep(VWORLD_GAP_S * 4)
+                    g = None
+                time.sleep(VWORLD_GAP_S)
+                if g and g["status"] == "OK":
+                    result = {"addr": addr, "type": kind, **g}
+                    break
+                if g is None:
+                    break  # transport error: do not cache, retry next run
+            if result is None and g is not None:
+                result = {"addr": addr, "status": "NOT_FOUND"}
+            if result:
+                result["at"] = now_iso()
+                f.write(json.dumps(result, ensure_ascii=False) + "\n")
+                f.flush()
+            if calls % 50 == 0:
+                log(f"  {calls} vworld calls so far")
+    log(f"geocode: done, {calls} vworld calls this run")
+
+
+# ---------------------------------------------------------------- station accessibility
+
+def cmd_station(_args: argparse.Namespace) -> None:
+    SEOUL_DIR.mkdir(parents=True, exist_ok=True)
+    with httpx.Client() as client:
+        status_rows = seoul_all(client, "SeoulMetroFaciInfo")
+        elvtr_rows = seoul_all(client, "tbTraficElvtr")
+        lift_rows = seoul_all(client, "tbTraficEntrcLft")
+    fetched = now_iso()
+
+    def point(wkt: str) -> tuple[float, float]:
+        x, y = wkt.replace("POINT(", "").rstrip(")").split()
+        return float(y), float(x)
+
+    def nodes(rows: list[dict]) -> list[dict]:
+        out = []
+        for r in rows:
+            # OA-21212 names it "양재(서초구청)"; "양재시민의숲(매헌)" is a different station
+            if (r.get("SBWY_STN_NM") or "").strip() == "양재(서초구청)":
+                lat, lon = point(r["NODE_WKT"])
+                out.append({"node_id": int(r["NODE_ID"]), "lat": round(lat, 7), "lon": round(lon, 7),
+                            "station_code": r.get("SBWY_STN_CD"), "dong": r.get("EMD_NM")})
+        return out
+
+    elevators = nodes(elvtr_rows)
+    lifts = nodes(lift_rows)
+    live = [{"name": r["ELVTR_NM"], "kind": r["ELVTR_SE"], "where": r["INSTL_PSTN"],
+             "floors": r["OPR_SEC"], "status": r["USE_YN"], "station": r["STN_NM"]}
+            for r in status_rows if (r.get("STN_NM") or "").startswith("양재(")]
+    pts = elevators + lifts
+    centre = ({"lat": round(sum(p["lat"] for p in pts) / len(pts), 7),
+               "lon": round(sum(p["lon"] for p in pts) / len(pts), 7),
+               "how": f"mean of {len(pts)} OA-21212/21211 nodes named 양재"} if pts else None)
+    out = {
+        "station": "양재 Yangjae (Line 3 / Shinbundang)",
+        "fetched_at": fetched,
+        "centre": centre,
+        "elevators_2020": elevators,
+        "entrance_lifts_2020": lifts,
+        "live_status": live,
+        "counts": {"SeoulMetroFaciInfo_total": len(status_rows), "tbTraficElvtr_total": len(elvtr_rows),
+                   "tbTraficEntrcLft_total": len(lift_rows)},
+        "notes": [
+            "live_status comes from OA-15994 (Seoul Metro only). The Shinbundang line platform is run by a "
+            "different operator and is not in this feed: missing rows mean no data, not no elevator.",
+            "elevators_2020 / entrance_lifts_2020 are 2020 positions (OA-21212 / OA-21211) and do not say "
+            "which exit they serve.",
+        ],
+        "sources": ["OA-15994 SeoulMetroFaciInfo", "OA-21212 tbTraficElvtr", "OA-21211 tbTraficEntrcLft"],
+    }
+    STATION_OUT.write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n")
+    log(f"station: {len(elevators)} elevator nodes, {len(lifts)} lifts, {len(live)} live status rows"
+        f" -> {STATION_OUT.relative_to(ROOT)}")
+
+
+def cmd_exits(_args: argparse.Namespace) -> None:
+    """Exit and elevator positions from OpenStreetMap (ODbL), so live status can sit on the map."""
+    station = json.loads(STATION_OUT.read_text())
+    c = station["centre"]
+    q = (f"[out:json][timeout:25];("
+         f'node["railway"="subway_entrance"](around:450,{c["lat"]},{c["lon"]});'
+         f'node["highway"="elevator"](around:450,{c["lat"]},{c["lon"]}););out body;')
+    els, errors = None, []
+    for endpoint in ("https://overpass-api.de/api/interpreter",
+                     "https://overpass.private.coffee/api/interpreter",
+                     "https://overpass.kumi.systems/api/interpreter"):
+        try:
+            r = httpx.post(endpoint, data={"data": q}, timeout=60,
+                           headers={"User-Agent": "barrier-lens-hackathon/0.1 (one-off fetch)"})
+            r.raise_for_status()
+            els = r.json().get("elements", [])
+            break
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{endpoint}: {e!r}"[:160])
+            time.sleep(3)
+    if els is None:
+        raise SystemExit("Overpass failed: " + " | ".join(errors))
+    keep = ("ref", "name", "name:en", "wheelchair", "railway", "highway", "level", "entrance")
+    out = {
+        "what": "Subway entrances and elevators within 450 m of the Yangjae centre, from OpenStreetMap",
+        "fetched_at": now_iso(),
+        "license": "ODbL 1.0, (c) OpenStreetMap contributors",
+        "nodes": [{"osm_id": e["id"], "lat": e["lat"], "lon": e["lon"],
+                   **{k: e["tags"][k] for k in keep if k in e.get("tags", {})}} for e in els],
+    }
+    (SEOUL_DIR / "yangjae-exits-osm.json").write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n")
+    log(f"exits: {len(out['nodes'])} OSM nodes -> data/seoul/yangjae-exits-osm.json")
+
+
+# ---------------------------------------------------------------- build the demo cache
+
+def cmd_build(_args: argparse.Namespace) -> None:
+    station = json.loads(STATION_OUT.read_text())
+    c = station["centre"]
+    cache = load_geocode_cache()
+    rows = [r for r in load_tow_rows() if in_target(r["ADDR"])]
+    groups: dict[str, list[dict]] = collections.defaultdict(list)
+    missing = 0
+    for r in rows:
+        g = cache.get(r["ADDR"].strip())
+        if not g:
+            missing += 1
+            continue
+        if g["status"] != "OK":
+            continue
+        groups[r["ADDR"].strip()].append(r)
+    points = []
+    for addr, rs in groups.items():
+        g = cache[addr]
+        d = haversine_m(c["lat"], c["lon"], g["lat"], g["lon"])
+        if d > BUILD_RADIUS_M:
+            continue
+        dates = sorted(r["DCLR_DT"] for r in rs)
+        points.append({
+            "addr": addr, "lat": g["lat"], "lon": g["lon"], "geocode": g["type"],
+            "count": len(rs), "first": dates[0], "last": dates[-1],
+            "by_year": dict(sorted(collections.Counter(x[:4] for x in dates).items())),
+            "types": dict(collections.Counter(r["TYPE"] for r in rs).most_common()),
+            "dist_m": round(d),
+        })
+    points.sort(key=lambda p: (-p["count"], p["dist_m"]))
+    all_dates = sorted(d for p in points for d in (p["first"], p["last"]))
+    not_found = sorted({a for a in (r["ADDR"].strip() for r in rows) if cache.get(a, {}).get("status") == "NOT_FOUND"})
+    out = {
+        "what": "E-scooter towing records (OA-23057) within 1 km of Yangjae Station, grouped by lot address",
+        "built_at": now_iso(),
+        "centre": c,
+        "radius_m": BUILD_RADIUS_M,
+        "records": sum(p["count"] for p in points),
+        "points": len(points),
+        "date_range": [all_dates[0], all_dates[-1]] if all_dates else None,
+        "coverage": {
+            "dongs_geocoded": list(TARGET_DONGS),
+            "rows_in_dongs": len(rows),
+            "rows_without_geocode_yet": missing,
+            "addresses_not_found": len(not_found),
+        },
+        "caveats": [
+            "Coordinates are VWorld parcel (lot) centroids, not the spot where the scooter stood: expect tens of metres of error.",
+            "Records are past towing reports (DCLR_DT = report date), not current obstacles.",
+            "Districts changed how they log towing over the years; compare years inside one district only.",
+        ],
+        "source": "Seoul Open Data Plaza OA-23057 (aiTbAutoKickboard), KOGL Type 1; geocoded with VWorld",
+        "data": points,
+    }
+    TOW_OUT.write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n")
+    log(f"build: {out['records']} records at {out['points']} addresses within {BUILD_RADIUS_M} m,"
+        f" dates {out['date_range']}, rows still without geocode: {missing} -> {TOW_OUT.relative_to(ROOT)}")
+
+
+def cmd_stats(_args: argparse.Namespace) -> None:
+    rows = load_tow_rows()
+    raw_lines = len(TOW_ROWS.read_text().splitlines()) if TOW_ROWS.exists() else 0
+    prog = [json.loads(x) for x in TOW_PROGRESS.read_text().splitlines()] if TOW_PROGRESS.exists() else []
+    log(f"towing pages done={len(prog)}, rows returned={sum(p['rows'] for p in prog)},"
+        f" kept lines={raw_lines}, unique kept NO={len(rows)}")
+    if rows:
+        dates = sorted(r["DCLR_DT"] for r in rows)
+        log(f"kept date range {dates[0]} .. {dates[-1]}")
+    by_gu = collections.Counter(r["GU_NM"] for r in rows)
+    log("by gu:", dict(by_gu))
+    for p in TARGET_DONGS:
+        rs = [r for r in rows if r["ADDR"].startswith(p + " ")]
+        log(f"  {p}: rows={len(rs)} unique addresses={len({r['ADDR'].strip() for r in rs})}")
+    cache = load_geocode_cache()
+    log(f"geocode cache: {len(cache)} ({collections.Counter(g['status'] for g in cache.values())})")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("towing")
+    g = sub.add_parser("geocode")
+    g.add_argument("--max", type=int, default=800, help="max addresses this run (VWorld daily budget)")
+    sub.add_parser("station")
+    sub.add_parser("exits")
+    sub.add_parser("build")
+    sub.add_parser("stats")
+    args = ap.parse_args()
+    {"towing": cmd_towing, "geocode": cmd_geocode, "station": cmd_station, "exits": cmd_exits,
+     "build": cmd_build, "stats": cmd_stats}[args.cmd](args)
+
+
+if __name__ == "__main__":
+    main()
