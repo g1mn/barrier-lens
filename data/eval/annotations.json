@@ -1,0 +1,40 @@
+{
+  "about": "HAND-ANNOTATED pixel points on the eval images (coordinates in the file as stored in data/eval, i.e. file_size from manifest.json). Read by eye, not detected: each point carries a few px of reading error (px_sd). Points were first read for a throwaway evaluator on 2026-10-28 and copied here unchanged. 'measure' says what the truth is compared with: point_to_point = ground distance between the two points; line_to_line = narrowest distance from the wall-base segment (barrier) to the kerb line (walkway edge). ground_lines are segments along the walkway used to estimate the tilt (vanishing point). Used by scripts/eval_public.py.",
+  "items": [
+    {
+      "id": "graz-kronesgasse-85",
+      "file": "graz-kronesgasse-85.jpg",
+      "annotation": "hand-annotated",
+      "measure": "line_to_line",
+      "px_sd": 4.0,
+      "edge": [[600, 708], [1050, 848]],
+      "edge_note": "kerb top edge, sidewalk side",
+      "barrier_line": [[450, 610], [1170, 785]],
+      "barrier_note": "base of the building wall (plinth)",
+      "ground_lines": [[[600, 708], [1050, 848]], [[450, 610], [1170, 785]]],
+      "ground_lines_note": "kerb line and wall base: two nearly parallel lines, so the tilt from them is weak"
+    },
+    {
+      "id": "teltow-osdorfer-ruler-1m",
+      "file": "teltow-osdorfer-ruler-1m.jpg",
+      "annotation": "hand-annotated",
+      "measure": "point_to_point",
+      "px_sd": 3.0,
+      "points": [[258, 683], [572, 648]],
+      "points_note": "the two ends of the white 1 m folding ruler",
+      "ground_lines": [[[330, 700], [500, 1000]], [[790, 700], [1060, 900]]],
+      "ground_lines_note": "edges of the paved path; ragged grass border, rough"
+    },
+    {
+      "id": "altenplathow-bridge-230-c",
+      "file": "altenplathow-bridge-230-c.jpg",
+      "annotation": "hand-annotated",
+      "measure": "point_to_point",
+      "px_sd": 4.0,
+      "points": [[303, 340], [612, 345]],
+      "points_note": "bases of the near ends of the left and right parapets (weak: our assumption of where the 2.30 m is taken)",
+      "ground_lines": [],
+      "ground_lines_note": "no usable ground lines"
+    }
+  ]
+}

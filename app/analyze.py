@@ -322,6 +322,13 @@ def _unknown(why: str) -> dict:
     return {"gap_cm": None, "band_cm": None, "verdict": "unknown", "why": why, "detail": {}}
 
 
+# replaces the fixed fallback text for "unknown", which asked for a reference as if it were required
+UNKNOWN_EXPLANATION = ("We could not measure this gap, so we cannot say whether your wheelchair fits. Film again with "
+                       "both sides of the gap and the ground in front of it in view. A reference on the ground (four "
+                       "A4 sheets or a tactile paving strip) is optional; a one-time calibration in your profile makes "
+                       "the measurement more accurate.")
+
+
 async def analyze(video_path: str | Path, lat: float | None, lon: float | None, replay: bool = False, *,
                   concepts_hint: list[str] | None = None, fixture_sha: str | None = None,
                   require_seated_height: bool = True, sample: bool = False, profile: dict | None = None,
@@ -429,12 +436,21 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
     assumptions = {"mode": mode, "label": calibration.LABELS[mode], "chair_width_cm": chair_cm,
                    "chair_source": chair_src, "pose": None if mode == "reference" else pose, "clip_hints": hints,
                    "main": calibration.assumption_text(mode, pose, chair_cm, chair_src, ref_concept)}
+    if mode != "reference" and pose["pitch_deg"] is None:
+        # say how geometry actually got the tilt: ground lines only when it used them, else its wide assumed range
+        used = ((m.get("detail") or {}).get("pose") or {}).get("pitch_source") == "ground lines"
+        assumptions["main"] = assumptions["main"].replace(
+            "Tilt not recorded, so it is estimated from lines on the ground.",
+            "Tilt not recorded, so it is estimated from lines on the ground." if used else
+            "Tilt not recorded, so a wide range of tilts is assumed; the motion sensor or a calibration narrows it.")
 
     # explanation
     t = time.monotonic()
     ex_in = {k: m.get(k) for k in ("gap_cm", "band_cm", "verdict", "why")}
     ex_in.update({"chair_width_cm": chair_cm, "barrier": ", ".join(barriers) or None})
     ex = await _explain(ex_in, replay)
+    if ex.get("model") == "template" and m.get("verdict") == "unknown":
+        ex = {**ex, "text": UNKNOWN_EXPLANATION}
     models["explain"] = ex.get("model")
     timings["explain_s"] = round(time.monotonic() - t, 2)
 
@@ -474,6 +490,8 @@ def _sample_source(only_sha: str | None = None) -> tuple[Path, str, list[str]] |
         g = groups.setdefault(sha, {"name": name, "bar": [], "ref": [], "objects": 0})
         g["objects"] += sum(len(f.get("objects", [])) for f in d["frames"])
         c = sam.normalize_concept(d.get("concept", ""))
+        if c in ("sidewalk", "pavement", "road", "curb"):  # ground-line probe fixtures, not barriers
+            continue
         (g["ref"] if c in REF_CONCEPTS or "tactile" in c or "paper" in c else g["bar"]).append(c)
     best = None
     for sha, g in groups.items():

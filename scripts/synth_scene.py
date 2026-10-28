@@ -10,6 +10,7 @@ writes scene.json there: the reference and barrier masks as SAM-style objects (m
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import math
 import sys
@@ -64,13 +65,69 @@ def box_corners(x0, x1, y0, y1, h):
     return np.array([[x, y, z] for x in (x0, x1) for y in (y0, y1) for z in (0.0, h)])
 
 
+def camera_truth(cam_kw: dict) -> dict:
+    """The pose a scene was rendered with, in app/calibration.camera_pose terms (pitch positive = down)."""
+    d = {k: v.default for k, v in inspect.signature(camera).parameters.items()}
+    d.update(cam_kw)
+    return {"height_m": d["cam_h"], "hfov_deg": d["hfov_deg"], "pitch_deg": d["pitch_deg"], "roll_deg": d["roll_deg"],
+            "yaw_deg": d["yaw_deg"], "frame_size": (d["width"], d["height"])}
+
+
+def roughen(mask: np.ndarray, px: int, seed: int = 0) -> np.ndarray:
+    """Move each row's left and right ends by a random whole number of pixels in [-px, px] (a ragged mask edge)."""
+    rng = np.random.default_rng(seed)
+    out = np.zeros_like(mask)
+    w = mask.shape[1]
+    for i in np.flatnonzero(mask.any(axis=1)):
+        cols = np.flatnonzero(mask[i])
+        a = int(np.clip(cols[0] + rng.integers(-px, px + 1), 0, w - 1))
+        b = int(np.clip(cols[-1] + rng.integers(-px, px + 1), 0, w - 1))
+        if b >= a:
+            out[i, a:b + 1] = True
+    return out
+
+
+def line_masks(cam, xs_m, occluders, width_m=0.06, near_m=0.6, far_m=8.0, splay_deg=0.0, rough_px=0,
+               seed=0) -> list[np.ndarray]:
+    """Thin ground lines running along the walkway (curb edges, paving joints) at X = xs_m, hidden where the
+    occluders stand in front of them. splay_deg turns each line about its near end by k * splay_deg (k = index - mean
+    index), i.e. lines that are NOT quite parallel; rough_px ragged edges."""
+    out = []
+    mid = (len(xs_m) - 1) / 2
+    for k, x in enumerate(xs_m):
+        a = math.radians(splay_deg * (k - mid))
+        dx = (far_m - near_m) * math.tan(a)
+        pts = np.array([[x - width_m / 2, near_m, 0], [x + width_m / 2, near_m, 0],
+                        [x + dx + width_m / 2, far_m, 0], [x + dx - width_m / 2, far_m, 0]])
+        m = raster_convex(cam, project(cam, pts))
+        for o in occluders:
+            m &= ~o
+        if rough_px:
+            m = roughen(m, rough_px, seed + k)
+        out.append(m)
+    return out
+
+
 def render_scene(gap_cm: float, dist_m: float, ref: str = "a4x4", box_w=0.40, box_d=0.40, box_h=0.80,
-                 ref_ahead_m=0.15, **cam_kw) -> dict:
+                 ref_ahead_m=0.15, lines_x_m=None, line_kw=None, **cam_kw) -> dict:
     """Barriers' near faces at Y = dist_m, inner faces at X = -gap/2 and +gap/2. Reference centred on the gap,
     its far edge ref_ahead_m in front of the barriers. The camera pitches to frame the reference and the barriers.
-    ref="strip" lays a 30 cm tactile strip along the walkway instead (see render_strip_scene)."""
+    ref="strip" lays a 30 cm tactile strip along the walkway instead (see render_strip_scene); ref="none" draws no
+    reference (camera_pose mode). lines_x_m adds ground lines along the walkway ("line_masks", see line_masks).
+    "camera" holds the true pose."""
     if ref == "strip":
         return render_strip_scene(gap_cm, dist_m, box_w=box_w, box_d=box_d, box_h=box_h, **cam_kw)
+    if ref == "none":
+        g = gap_cm / 100.0
+        cam_kw.setdefault("pitch_deg", math.degrees(math.atan2(cam_kw.get("cam_h", 0.75), dist_m - 0.2)))
+        cam = camera(**cam_kw)
+        left = box_corners(-g / 2 - box_w, -g / 2, dist_m, dist_m + box_d, box_h)
+        right = box_corners(g / 2, g / 2 + box_w, dist_m, dist_m + box_d, box_h)
+        barriers = [raster_convex(cam, project(cam, b)) for b in (left, right)]
+        lines = [] if lines_x_m is None else line_masks(cam, lines_x_m, barriers, **(line_kw or {}))
+        return {"frame_size": (cam["w"], cam["h"]), "ref_kind": "none", "barrier_masks": barriers,
+                "line_masks": lines, "true_gap_cm": gap_cm, "dist_m": dist_m, "pitch_deg": cam_kw["pitch_deg"],
+                "camera": camera_truth(cam_kw)}
     g = gap_cm / 100.0
     ra, rl = REFS[ref]
     ref_far = dist_m - ref_ahead_m
@@ -85,9 +142,10 @@ def render_scene(gap_cm: float, dist_m: float, ref: str = "a4x4", box_w=0.40, bo
     left = box_corners(-g / 2 - box_w, -g / 2, dist_m, dist_m + box_d, box_h)
     right = box_corners(g / 2, g / 2 + box_w, dist_m, dist_m + box_d, box_h)
     barriers = [raster_convex(cam, project(cam, b)) for b in (left, right)]
+    lines = [] if lines_x_m is None else line_masks(cam, lines_x_m, barriers, **(line_kw or {}))
     return {"frame_size": (cam["w"], cam["h"]), "ref_mask": ref_mask, "ref_corners_true": ref_img,
             "ref_kind": ref, "barrier_masks": barriers, "true_gap_cm": gap_cm, "dist_m": dist_m,
-            "pitch_deg": cam_kw["pitch_deg"]}
+            "pitch_deg": cam_kw["pitch_deg"], "line_masks": lines, "camera": camera_truth(cam_kw)}
 
 
 def render_strip_scene(gap_cm: float, dist_m: float, strip_x_m: float = 0.0, strip_w_m: float = 0.30,

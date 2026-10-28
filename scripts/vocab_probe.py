@@ -31,6 +31,13 @@ PLAN = [
     ("sidewalk-closed-0-3s.mp4", ["sign", "sidewalk closed sign"]),
     ("scooters-city-6-9s.mp4", ["tactile paving", "yellow tactile paving", "tactile paving strip", "yellow tile"]),
     ("scooters-city-6-9s.mp4", ["scooter"]),
+    # ground surfaces whose mask edges could give two converging lines for horizon / pitch (one group each,
+    # so every phrase is asked even when an earlier one works)
+    ("scooters-row-0-3s.mp4", ["sidewalk"]),
+    ("scooters-row-0-3s.mp4", ["curb"]),
+    ("scooters-row-0-3s.mp4", ["road"]),
+    ("scooters-city-6-9s.mp4", ["sidewalk"]),
+    ("scooters-city-6-9s.mp4", ["pavement"]),
 ]
 FIXTURE_MAX_BYTES = 250_000
 FIXTURE_MAX_FRAMES = 30
@@ -102,6 +109,9 @@ async def probe(clip_dir: Path, budget: int, fixtures: bool) -> list[dict]:
     async with httpx.AsyncClient(timeout=sam.TIMEOUT) as client:
         for clip_name, phrases in PLAN:
             clip = clip_dir / clip_name
+            if not clip.exists():
+                print(f"{clip_name:28} missing in {clip_dir}, skipped")
+                continue
             for phrase in phrases:
                 if not cached(clip, phrase):
                     if paid >= budget:
@@ -189,6 +199,8 @@ def main() -> int:
     clip_dir = Path(a.clip_dir)
     if a.sheets:
         for clip_name, phrases in PLAN:
+            if not (clip_dir / clip_name).exists():
+                continue
             for p in phrases:
                 path = sheet(clip_dir / clip_name, p, Path(a.sheets))
                 if path:

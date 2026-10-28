@@ -1,0 +1,187 @@
+{
+ "about": "scripts/eval_public.py output: camera_pose bands vs public ground truth. Hand-annotated points; camera heights for 'calibrated' are guesses; cal+sensor tilt is centred on the line pitch (not an independent sensor). 3 images: small sample.",
+ "draws": 1000,
+ "results": [
+  {
+   "id": "graz-kronesgasse-85",
+   "truth_cm": 85.0,
+   "relation": "equals",
+   "annotation": "hand-annotated",
+   "profiles": {
+    "seated": {
+     "gap_cm": 48.0,
+     "band_cm": [
+      20.2,
+      124.1
+     ],
+     "verdict": "tight",
+     "inside": true,
+     "pitch_source": "ground lines",
+     "pitch_deg": 8.53,
+     "pitch_sd_deg": 1.7,
+     "dominant_error": "roll",
+     "why": "narrowest point 48 cm (95% band 20-124) is between the 70 cm chair width and the 80 cm needed with clearance; no reference in view, so measured from the camera pose (default assumptions): camera 65-90 cm above the ground (default (armrest height)), field of view 65-76 deg (default (typical phone main camera)), tilt 8.5 +- 1.7 deg down, estimated from 2 ground-line edges (sd from a bootstrap of the edge fits), roll assumed level (+- 6 deg); largest error source: roll (alone it spans 77 cm of the band)"
+    },
+    "standing": {
+     "gap_cm": 99.3,
+     "band_cm": [
+      41.5,
+      242.8
+     ],
+     "verdict": "tight",
+     "inside": true,
+     "pitch_source": "ground lines",
+     "pitch_deg": 8.53,
+     "pitch_sd_deg": 1.7,
+     "dominant_error": "roll",
+     "why": "narrowest point 99 cm (95% band 42-243) is between the 70 cm chair width and the 80 cm needed with clearance; no reference in view, so measured from the camera pose (default assumptions): camera 140-170 cm above the ground (standing photographer (eval profile)), field of view 65-76 deg (default (typical phone main camera)), tilt 8.5 +- 1.7 deg down, estimated from 2 ground-line edges (sd from a bootstrap of the edge fits), roll assumed level (+- 6 deg); largest error source: roll (alone it spans 158 cm of the band)"
+    },
+    "calibrated": {
+     "gap_cm": 94.1,
+     "band_cm": [
+      40.1,
+      234.5
+     ],
+     "verdict": "tight",
+     "inside": true,
+     "pitch_source": "ground lines",
+     "pitch_deg": 7.61,
+     "pitch_sd_deg": 1.52,
+     "dominant_error": "roll",
+     "why": "narrowest point 94 cm (95% band 40-234) is between the 70 cm chair width and the 80 cm needed with clearance; no reference in view, so measured from the camera pose (your calibration): camera 135-145 cm above the ground (camera_height_guess_m mid-point (our guess)), field of view 63-64 deg (EXIF focal 5.0 mm + spec sensor width 6.17 mm), tilt 7.6 +- 1.5 deg down, estimated from 2 ground-line edges (sd from a bootstrap of the edge fits), roll assumed level (+- 6 deg); largest error source: roll (alone it spans 151 cm of the band)"
+    },
+    "cal+sensor": {
+     "gap_cm": 94.1,
+     "band_cm": [
+      55.4,
+      136.9
+     ],
+     "verdict": "tight",
+     "inside": true,
+     "pitch_source": "given",
+     "pitch_deg": 7.61,
+     "pitch_sd_deg": 1.5,
+     "dominant_error": "tilt",
+     "why": "narrowest point 94 cm (95% band 55-137) is between the 70 cm chair width and the 80 cm needed with clearance; no reference in view, so measured from the camera pose (your calibration): camera 135-145 cm above the ground (camera_height_guess_m mid-point (our guess)), field of view 63-64 deg (EXIF focal 5.0 mm + spec sensor width 6.17 mm), tilt 7.6 +- 1.5 deg down (simulated sensor centred on the line pitch), roll 0.0 +- 3.0 deg; largest error source: tilt (alone it spans 58 cm of the band)"
+    }
+   }
+  },
+  {
+   "id": "teltow-osdorfer-ruler-1m",
+   "truth_cm": 100.0,
+   "relation": "equals",
+   "annotation": "hand-annotated",
+   "profiles": {
+    "seated": {
+     "gap_cm": 44.4,
+     "band_cm": [
+      37.4,
+      56.9
+     ],
+     "verdict": "blocked",
+     "inside": false,
+     "pitch_source": "ground lines",
+     "pitch_deg": 22.86,
+     "pitch_sd_deg": 1.5,
+     "dominant_error": "height",
+     "why": "narrowest point 44 cm (95% band 37-57) < 70 cm chair width; no reference in view, so measured from the camera pose (default assumptions): camera 65-90 cm above the ground (default (armrest height)), field of view 65-76 deg (default (typical phone main camera)), tilt 22.9 +- 1.5 deg down, estimated from 2 ground-line edges (sd from a bootstrap of the edge fits, raised to the floor), roll assumed level (+- 6 deg); largest error source: height (alone it spans 14 cm of the band)"
+    },
+    "standing": {
+     "gap_cm": 91.8,
+     "band_cm": [
+      78.7,
+      109.0
+     ],
+     "verdict": "tight",
+     "inside": true,
+     "pitch_source": "ground lines",
+     "pitch_deg": 22.86,
+     "pitch_sd_deg": 1.5,
+     "dominant_error": "tilt",
+     "why": "narrowest point 92 cm (95% band 79-109) is between the 70 cm chair width and the 80 cm needed with clearance; no reference in view, so measured from the camera pose (default assumptions): camera 140-170 cm above the ground (standing photographer (eval profile)), field of view 65-76 deg (default (typical phone main camera)), tilt 22.9 +- 1.5 deg down, estimated from 2 ground-line edges (sd from a bootstrap of the edge fits, raised to the floor), roll assumed level (+- 6 deg); largest error source: tilt (alone it spans 18 cm of the band)"
+    },
+    "calibrated": {
+     "gap_cm": 88.4,
+     "band_cm": [
+      73.8,
+      124.0
+     ],
+     "verdict": "tight",
+     "inside": true,
+     "pitch_source": "ground lines",
+     "pitch_deg": 14.76,
+     "pitch_sd_deg": 1.5,
+     "dominant_error": "tilt",
+     "why": "narrowest point 88 cm (95% band 74-124) is between the 70 cm chair width and the 80 cm needed with clearance; no reference in view, so measured from the camera pose (your calibration): camera 145-155 cm above the ground (camera_height_guess_m mid-point (our guess)), field of view 46-47 deg (35mm-equivalent focal (EXIF), diagonal convention), tilt 14.8 +- 1.5 deg down, estimated from 2 ground-line edges (sd from a bootstrap of the edge fits, raised to the floor), roll assumed level (+- 6 deg); largest error source: tilt (alone it spans 32 cm of the band)"
+    },
+    "cal+sensor": {
+     "gap_cm": 88.5,
+     "band_cm": [
+      75.0,
+      111.9
+     ],
+     "verdict": "tight",
+     "inside": true,
+     "pitch_source": "given",
+     "pitch_deg": 14.76,
+     "pitch_sd_deg": 1.5,
+     "dominant_error": "tilt",
+     "why": "narrowest point 88 cm (95% band 75-112) is between the 70 cm chair width and the 80 cm needed with clearance; no reference in view, so measured from the camera pose (your calibration): camera 145-155 cm above the ground (camera_height_guess_m mid-point (our guess)), field of view 46-47 deg (35mm-equivalent focal (EXIF), diagonal convention), tilt 14.8 +- 1.5 deg down (simulated sensor centred on the line pitch), roll 0.0 +- 3.0 deg; largest error source: tilt (alone it spans 33 cm of the band)"
+    }
+   }
+  },
+  {
+   "id": "altenplathow-bridge-230-c",
+   "truth_cm": 229.99999999999997,
+   "relation": "equals",
+   "annotation": "hand-annotated",
+   "profiles": {
+    "seated": {
+     "gap_cm": 111.3,
+     "band_cm": [
+      64.0,
+      419.9
+     ],
+     "verdict": "tight",
+     "inside": true,
+     "pitch_source": "prior",
+     "pitch_deg": 15.0,
+     "pitch_sd_deg": null,
+     "dominant_error": "tilt",
+     "why": "narrowest point 111 cm (95% band 64-420) is between the 70 cm chair width and the 80 cm needed with clearance; no reference in view, so measured from the camera pose (default assumptions): camera 65-90 cm above the ground (default (armrest height)), field of view 65-76 deg (default (typical phone main camera)), tilt not measured, assumed anywhere 0-30 deg down (no ground lines found), roll assumed level (+- 6 deg); largest error source: tilt (alone it spans 287 cm of the band)"
+    },
+    "standing": {
+     "gap_cm": 224.9,
+     "band_cm": [
+      134.1,
+      830.5
+     ],
+     "verdict": "passes",
+     "inside": true,
+     "pitch_source": "prior",
+     "pitch_deg": 15.0,
+     "pitch_sd_deg": null,
+     "dominant_error": "tilt",
+     "why": "narrowest point 225 cm (95% band 134-831) >= 80 cm needed; no reference in view, so measured from the camera pose (default assumptions): camera 140-170 cm above the ground (standing photographer (eval profile)), field of view 65-76 deg (default (typical phone main camera)), tilt not measured, assumed anywhere 0-30 deg down (no ground lines found), roll assumed level (+- 6 deg); largest error source: tilt (alone it spans 593 cm of the band)"
+    },
+    "calibrated": {
+     "gap_cm": 149.0,
+     "band_cm": [
+      88.1,
+      929.9
+     ],
+     "verdict": "passes",
+     "inside": true,
+     "pitch_source": "prior",
+     "pitch_deg": 15.0,
+     "pitch_sd_deg": null,
+     "dominant_error": "tilt",
+     "why": "narrowest point 149 cm (95% band 88-930) >= 80 cm needed; no reference in view, so measured from the camera pose (your calibration): camera 155-165 cm above the ground (camera_height_guess_m mid-point (our guess)), field of view 43-44 deg (35mm-equivalent focal (EXIF), diagonal convention), tilt not measured, assumed anywhere 0-30 deg down (no ground lines found), roll assumed level (+- 6 deg); largest error source: tilt (alone it spans 623 cm of the band)"
+    },
+    "cal+sensor": {
+     "skipped": "no ground lines found"
+    }
+   }
+  }
+ ]
+}

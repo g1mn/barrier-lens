@@ -413,7 +413,7 @@
     dropPin(result, at);
     if (stage.classList.contains('no-video')) { check.playing = false; togglePlay(); } else { draw(); video.play().catch(() => {}); }
     loopForVideo();
-    $('#verdict').focus({ preventScroll: false });
+    $('#verdict').focus({ preventScroll: true }); $('#verdict').scrollIntoView({ block: 'start' });  // card taller than the sheet: show its verdict word, not its middle
   }
 
   // result.masks: [{concept, role, source, frames: [{i, objects: [{id, polygon, polygons}]}]}] in frame_size pixels.
