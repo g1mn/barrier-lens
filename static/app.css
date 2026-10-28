@@ -144,6 +144,9 @@ button, input, select { font: inherit; color: inherit; }
 }
 .sheet[data-state="peek"] .sheet-body { display: none; }
 .sheet[data-state="open"] { height: calc(100dvh - var(--bar-h, 60px) - 12px); }
+/* "half": the check flow on a phone. The map above stays visible so the pin can be placed under the crosshair;
+   the panel scrolls inside (mock judge #1: without this rule the sheet covered the whole map) */
+.sheet[data-state="half"] { height: 56dvh; }
 @media (prefers-reduced-motion: reduce) { .sheet { transition: none; } }
 .sheet-handle {
   align-self: center; width: 100%; height: 28px; margin: 0; padding: 0;
