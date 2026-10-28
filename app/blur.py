@@ -32,8 +32,13 @@ YUNET_URL = "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection
 YUNET_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
 SCORE_THRESHOLD = 0.6   # below YuNet's 0.9 default: a missed face costs more than an extra blurred patch
 CARRY_FRAMES = 3
-VERSION = 2  # bump when detection or blurring changes; cached blurred clips are rebuilt
+VERSION = 3  # bump when detection or blurring changes; cached blurred clips are rebuilt
 UPSCALE = 2
+# YuNet's memory grows with its input area: a 2x 1280x720 frame (3.7 MP) took ~450 MB, over a 512 MB free host.
+# So the upscaled pass runs in overlapping tiles of at most this many pixels, and a full-frame pass at 1x catches
+# faces large enough to be cut by a tile edge.
+TILE_MAX_PX = 1_000_000
+TILE_OVERLAP = 96  # px in the upscaled image: wider than a small face there
 PAD_X, PAD_Y = 0.30, 0.40  # grow each box so hair, ears and chin are covered
 
 
@@ -90,14 +95,18 @@ class FaceDetector:
         h, w = img.shape[:2]
         boxes = []
         if self._yunet is not None:
-            # 2x upscale: pedestrians in a sidewalk clip are often small; YuNet misses faces under ~10 px
+            # 1x full frame (large faces), then 2x in tiles: pedestrians in a sidewalk clip are often small and
+            # YuNet misses faces under ~10 px
             s = UPSCALE if max(w, h) * UPSCALE <= 2600 else 1
-            big = cv2.resize(img, (w * s, h * s), interpolation=cv2.INTER_LINEAR) if s > 1 else img
-            self._yunet.setInputSize((w * s, h * s))
-            _, faces = self._yunet.detect(big)
-            for f in faces if faces is not None else []:
-                x, y, bw, bh = (float(v) / s for v in f[:4])
-                boxes.append((x, y, x + bw, y + bh))
+            passes = [(1, img)] + ([(s, cv2.resize(img, (w * s, h * s), interpolation=cv2.INTER_LINEAR))] if s > 1 else [])
+            for sc, im in passes:
+                for tx, ty, tw, th in tiles(im.shape[1], im.shape[0], TILE_MAX_PX, TILE_OVERLAP):
+                    self._yunet.setInputSize((tw, th))
+                    _, faces = self._yunet.detect(np.ascontiguousarray(im[ty:ty + th, tx:tx + tw]))
+                    for f in faces if faces is not None else []:
+                        x, y, bw, bh = ((float(f[0]) + tx) / sc, (float(f[1]) + ty) / sc, float(f[2]) / sc, float(f[3]) / sc)
+                        boxes.append((x, y, x + bw, y + bh))
+            boxes = dedupe(boxes)
         else:
             gray = cv2.equalizeHist(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
             for c in self._haar:
@@ -113,6 +122,33 @@ class FaceDetector:
             if b[2] > b[0] and b[3] > b[1]:
                 out.append(b)
         return out
+
+
+def tiles(w: int, h: int, max_px: int, overlap: int) -> list[tuple[int, int, int, int]]:
+    """(x, y, width, height) tiles covering a w x h image, each at most ~max_px pixels, neighbours overlapping."""
+    side = max(64, int(max_px ** 0.5))
+    nx, ny = max(1, -(-w // side)), max(1, -(-h // side))
+    out = []
+    for j in range(ny):
+        for i in range(nx):
+            x0, y0 = max(0, i * w // nx - overlap // 2), max(0, j * h // ny - overlap // 2)
+            x1, y1 = min(w, (i + 1) * w // nx + overlap // 2), min(h, (j + 1) * h // ny + overlap // 2)
+            out.append((x0, y0, x1 - x0, y1 - y0))
+    return out
+
+
+def dedupe(boxes: list, iou: float = 0.3) -> list:
+    """Drop a box that overlaps a bigger kept one by more than iou (the same face seen in two passes or tiles)."""
+    kept: list = []
+    for b in sorted(boxes, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]), reverse=True):
+        def ov(a):
+            ix, iy = max(0.0, min(a[2], b[2]) - max(a[0], b[0])), max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+            inter = ix * iy
+            union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+            return inter / union if union > 0 else 0.0
+        if all(ov(a) <= iou for a in kept):
+            kept.append(b)
+    return kept
 
 
 def blur_boxes(img: np.ndarray, boxes) -> np.ndarray:

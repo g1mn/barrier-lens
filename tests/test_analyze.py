@@ -350,3 +350,18 @@ def test_live_checks_need_the_demo_token_when_set(env, clip_src, monkeypatch):
     # replay never costs anything, so it stays open
     r = c.post("/api/analyze", files=files, data={"lat": "37.48", "lon": "127.03", "replay": "true"})
     assert r.status_code == 200
+
+
+def test_blur_tiles_cover_the_frame_and_bound_the_detector_input():
+    for w, h in [(1280, 720), (2560, 1440), (720, 1280), (300, 200)]:
+        t = blur.tiles(w, h, 1_000_000, 96)
+        assert max(tw * th for _, _, tw, th in t) <= 1_000_000 * 1.2
+        cover = np.zeros((h, w), bool)
+        for x, y, tw, th in t:
+            cover[y:y + th, x:x + tw] = True
+        assert cover.all()
+
+
+def test_blur_dedupe_keeps_one_box_per_face():
+    face, same_face_from_a_tile, other = (100, 100, 140, 150), (102, 101, 139, 149), (400, 100, 430, 140)
+    assert sorted(blur.dedupe([face, same_face_from_a_tile, other])) == sorted([face, other])
