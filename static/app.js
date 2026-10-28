@@ -270,6 +270,9 @@
     fd.append('video', f);
     fd.append('lat', at.lat.toFixed(6));
     fd.append('lon', at.lng.toFixed(6));
+    if (profile) fd.append('profile', JSON.stringify(profile));
+    const s = tilt.read(f);
+    if (s) fd.append('sensor', JSON.stringify(s));
     $('#analyze-btn').disabled = true;
     setStatus('Blurring faces on this server, then measuring… this can take a minute.');
     const result = await getJson('/api/analyze', { method: 'POST', body: fd });
@@ -322,7 +325,11 @@
     if (params.get('verdict')) { await runSample(false, at); return; }  // hand-made UI fixture variants
     $('#sample-btn').disabled = true;
     setStatus('Running the sample clip…');
-    const result = await getJson(`/api/sample?lat=${at.lat.toFixed(6)}&lon=${at.lng.toFixed(6)}`);
+    const sfd = new FormData();
+    sfd.append('lat', at.lat.toFixed(6));
+    sfd.append('lon', at.lng.toFixed(6));
+    if (profile) sfd.append('profile', JSON.stringify(profile));
+    const result = await getJson('/api/sample', { method: 'POST', body: sfd });
     $('#sample-btn').disabled = false;
     if (!result) return;
     clip.value = '';
@@ -436,6 +443,7 @@
     kicker.classList.toggle('sample', sample);
     $('#v-gap').textContent = result.gap_cm == null ? '—' : `${Math.round(result.gap_cm)} cm`;
     $('#v-band').textContent = Array.isArray(result.band_cm) ? `${Math.round(result.band_cm[0])}–${Math.round(result.band_cm[1])} cm` : '—';
+    renderAssumptions(result);
     $('#v-why').textContent = result.why || '';
     $('#v-explain').textContent = typeof result.explanation === 'string' ? result.explanation : (result.explanation?.text || '');
     const md = result.models || {};
@@ -608,6 +616,166 @@
   }
   playBtn.addEventListener('click', togglePlay);
   $('#mask-toggle').addEventListener('change', () => draw());
+
+  // ------------------------------------------------------------------ calibration profile + tilt sensor
+  // The profile lives only in this browser (localStorage) and goes with every check; see app/calibration.py.
+  const PROFILE_KEY = 'bl.profile.v1';
+  const CHAIR_DEFAULT = { manual: 65, power: 70 };
+  function loadProfile() {
+    try { const p = JSON.parse(store.get(PROFILE_KEY) || 'null'); return p && typeof p === 'object' ? p : null; } catch { return null; }
+  }
+  function saveProfile(p) { store.set(PROFILE_KEY, JSON.stringify(p)); }
+  let profile = loadProfile();
+
+  const calForm = $('#calib-form');
+  const calStatus = $('#calib-status');
+  function calibState() {
+    const el = $('#calib-state');
+    const mode = profile?.calibration ? 'calibrated' : profile ? 'saved' : 'default';
+    el.dataset.mode = mode;
+    el.textContent = mode === 'calibrated' ? `Calibrated · ${Math.round(profile.calibration.height_m * 100)} cm`
+      : mode === 'saved' ? `Profile · ${Math.round(profile.chair_width_cm)} cm chair` : 'Default assumptions';
+  }
+  function fillForm() {
+    const p = profile || {};
+    const type = p.chair_type || 'manual';
+    const radio = document.getElementById(`ch-${type}`);
+    if (radio) radio.checked = true;
+    $('#cal-width').value = p.chair_width_cm ?? CHAIR_DEFAULT[type] ?? 65;
+    $('#cal-armrest').value = p.armrest_height_cm ?? 75;
+    $('#cal-phone').value = p.phone_model || '';
+    $('#cal-focal').value = p.focal_35mm ?? '';
+    calibState();
+  }
+  calForm.querySelectorAll('input[name=chair]').forEach((el) => el.addEventListener('change', () => {
+    if (el.checked && CHAIR_DEFAULT[el.value]) $('#cal-width').value = CHAIR_DEFAULT[el.value];
+    if (el.checked && el.value === 'custom') $('#cal-width').focus();
+  }));
+  function formProfile() {
+    const num = (sel) => { const v = parseFloat($(sel).value); return Number.isFinite(v) ? v : null; };
+    const p = { chair_type: calForm.querySelector('input[name=chair]:checked').value };
+    const w = num('#cal-width'); const h = num('#cal-armrest'); const f = num('#cal-focal');
+    if (w == null || w < 40 || w > 100) return { error: 'Width must be 40–100 cm.' };
+    if (h == null || h < 40 || h > 130) return { error: 'Armrest height must be 40–130 cm.' };
+    if (f != null && (f < 10 || f > 80)) return { error: 'Focal length must be 10–80 mm, or left empty.' };
+    Object.assign(p, { chair_width_cm: w, armrest_height_cm: h });
+    if (f != null) p.focal_35mm = f;
+    if ($('#cal-phone').value.trim()) p.phone_model = $('#cal-phone').value.trim().slice(0, 60);
+    if (profile?.calibration) p.calibration = profile.calibration;
+    return p;
+  }
+  calForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const p = formProfile();
+    if (p.error) { calStatus.textContent = p.error; calStatus.classList.add('warn'); return; }
+    profile = p;
+    saveProfile(profile);
+    calStatus.classList.remove('warn');
+    calStatus.textContent = `Saved on this phone: ${Math.round(p.chair_width_cm)} cm chair, phone at about ${Math.round(p.armrest_height_cm)} cm. Sent with every check.`;
+    calibState();
+  });
+  $('#cal-reset').addEventListener('click', () => {
+    profile = null;
+    try { localStorage.removeItem(PROFILE_KEY); } catch { /* ignore */ }
+    fillForm();
+    calStatus.classList.remove('warn');
+    calStatus.textContent = 'Profile cleared. Checks use default assumptions again.';
+  });
+  $('#cal-clip').addEventListener('click', () => tilt.mark());
+  $('#cal-clip').addEventListener('change', () => { $('#cal-run').disabled = !($('#cal-clip').files || [])[0]; });
+  $('#cal-run').addEventListener('click', async () => {
+    const f = ($('#cal-clip').files || [])[0];
+    if (!f) return;
+    const p = formProfile();
+    if (p.error) { calStatus.textContent = p.error; calStatus.classList.add('warn'); return; }
+    const fd = new FormData();
+    fd.append('video', f);
+    fd.append('ref_kind', calForm.querySelector('input[name=refkind]:checked').value);
+    fd.append('profile', JSON.stringify(p));
+    const s = tilt.read(f);
+    if (s) fd.append('sensor', JSON.stringify(s));
+    $('#cal-run').disabled = true;
+    calStatus.classList.remove('warn');
+    calStatus.textContent = 'Blurring faces, finding the reference, solving height and tilt…';
+    let j = null;
+    try {
+      const res = await fetch('/api/calibrate', { method: 'POST', body: fd });
+      j = await res.json().catch(() => null);
+      if (!res.ok) throw new Error((j && typeof j.detail === 'string' && j.detail) || `HTTP ${res.status}`);
+    } catch (e) {
+      calStatus.textContent = `Calibration failed: ${e.message}`;
+      calStatus.classList.add('warn');
+      $('#cal-run').disabled = false;
+      return;
+    }
+    $('#cal-run').disabled = false;
+    if (!j.ok) { calStatus.textContent = j.why; calStatus.classList.add('warn'); return; }
+    const c = { ...j.calibration, at: new Date().toISOString().slice(0, 10) };
+    profile = { ...p, calibration: c };
+    saveProfile(profile);
+    calStatus.textContent = `Calibrated: phone at ${Math.round(c.height_m * 100)} cm, tilted ${Math.round(c.pitch_deg)}° down`
+      + (c.pitch_bias_deg == null ? ' (no tilt sensor reading, so later checks still estimate tilt).' : `; sensor offset ${c.pitch_bias_deg.toFixed(1)}°.`)
+      + ` Solved on ${c.frames_used} frames.`;
+    calibState();
+  });
+
+  // Tilt: DeviceOrientationEvent beta/gamma, averaged over the window from tapping "film" to the clip arriving.
+  // Only a clip recorded just now is paired with a reading; a clip picked from the gallery gets none.
+  const tilt = {
+    on: false, buf: [], t0: 0,
+    listen() {
+      if (this.on) return;
+      this.on = true;
+      window.addEventListener('deviceorientation', (e) => {
+        if (e.beta == null || e.gamma == null) return;
+        this.buf.push({ t: Date.now(), beta: e.beta, gamma: e.gamma, angle: (screen.orientation && screen.orientation.angle) || window.orientation || 0 });
+        if (this.buf.length > 4000) this.buf.splice(0, 2000);
+      });
+      $('#tilt-btn').setAttribute('aria-pressed', 'true');
+      $('#tilt-btn').textContent = 'Phone tilt on';
+      $('#tilt-state').textContent = 'Tilt is read while you film and sent with the clip.';
+    },
+    mark() { this.t0 = Date.now(); },
+    read(file) {
+      if (!this.on || !file || !this.t0) return null;
+      const recent = Date.now() - (file.lastModified || 0) < 120000;
+      if (!recent) return null;
+      let win = this.buf.filter((s) => s.t >= this.t0);
+      if (win.length < 5) win = this.buf.filter((s) => s.t >= this.t0 - 3000 && s.t < this.t0 + 1000);
+      if (win.length < 5) return null;
+      const avg = (k) => win.reduce((a, s) => a + s[k], 0) / win.length;
+      const gammaAbs = win.reduce((a, s) => a + Math.abs(s.gamma), 0) / win.length;
+      const angle = win[win.length - 1].angle;
+      return { beta: +avg('beta').toFixed(2), gamma: +((angle % 180 ? gammaAbs * Math.sign(avg('gamma') || 1) : avg('gamma'))).toFixed(2), angle, n: win.length };
+    },
+  };
+  if ('DeviceOrientationEvent' in window && window.matchMedia('(pointer: coarse)').matches) {
+    $('#tilt-row').hidden = false;
+    if (typeof DeviceOrientationEvent.requestPermission !== 'function') tilt.listen();
+  }
+  $('#tilt-btn').addEventListener('click', async () => {
+    try {
+      if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const r = await DeviceOrientationEvent.requestPermission();
+        if (r !== 'granted') { $('#tilt-state').textContent = 'Tilt permission was not given; tilt is estimated from the clip.'; return; }
+      }
+      tilt.listen();
+    } catch (e) {
+      $('#tilt-state').textContent = `Tilt sensor unavailable (${e.message}); tilt is estimated from the clip.`;
+    }
+  });
+  clip.addEventListener('click', () => tilt.mark());
+
+  function renderAssumptions(result) {
+    const a = result.assumptions;
+    const el = $('#v-assume');
+    if (!a) { el.hidden = true; return; }
+    el.dataset.mode = a.mode;
+    $('#v-assume-tag').textContent = a.label;
+    $('#v-assume-text').textContent = a.main;
+    el.hidden = false;
+  }
+  fillForm();
 
   // ------------------------------------------------------------------ start
   layout();

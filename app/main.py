@@ -65,6 +65,8 @@ async def api_analyze(
     lat: float = Form(..., ge=-90, le=90),
     lon: float = Form(..., ge=-180, le=180),
     replay: bool = Form(False, description="cached/fixture results only, never a paid call"),
+    profile: str | None = Form(None, description="JSON calibration profile (app/calibration.py clean_profile)"),
+    sensor: str | None = Form(None, description="JSON averaged DeviceOrientation {beta, gamma, angle, n}"),
 ) -> dict:
     """Upload a clip -> normalise, blur faces locally, triage, SAM, geometry, explanation (see app/analyze.py)."""
     up_dir = _analyze.WORK_DIR / "uploads"
@@ -82,7 +84,8 @@ async def api_analyze(
                 f.write(chunk)
         if size == 0:
             raise HTTPException(400, "empty upload")
-        return await _analyze.analyze(tmp, lat, lon, replay=replay)
+        return await _analyze.analyze(tmp, lat, lon, replay=replay, profile=_cal.parse_json(profile),
+                                      sensor=_cal.parse_json(sensor))
     except _analyze.AnalyzeError as e:
         raise HTTPException(422, str(e)) from None
     except _analyze.SpendCapError as e:
@@ -116,3 +119,57 @@ async def api_sample(
         raise HTTPException(404, str(e)) from None
     except _blur.BlurError as e:
         raise HTTPException(503, str(e)) from None
+
+
+# ---- calibration routes (role: calibration-ui) ------------------------------
+from app import calibration as _cal  # noqa: E402
+
+
+@app.post("/api/sample")
+async def api_sample_post(
+    lat: float | None = Form(None, ge=-90, le=90),
+    lon: float | None = Form(None, ge=-180, le=180),
+    profile: str | None = Form(None),
+    sensor: str | None = Form(None),
+) -> dict:
+    """GET /api/sample with the user's calibration profile applied (replay mode, no paid calls)."""
+    try:
+        return await _analyze.run_sample(lat, lon, profile=_cal.parse_json(profile), sensor=_cal.parse_json(sensor))
+    except _analyze.AnalyzeError as e:
+        raise HTTPException(404, str(e)) from None
+    except _blur.BlurError as e:
+        raise HTTPException(503, str(e)) from None
+
+
+@app.post("/api/calibrate")
+async def api_calibrate(
+    video: UploadFile = File(..., description="a few seconds of the reference flat on the ground"),
+    ref_kind: str = Form("a4x4", pattern="^(a4x4|tactile_block)$"),
+    profile: str | None = Form(None),
+    sensor: str | None = Form(None),
+    replay: bool = Form(False),
+) -> dict:
+    """One-time calibration: solve camera height and tilt from a reference of known size (app/calibration.py)."""
+    up_dir = _analyze.WORK_DIR / "uploads"
+    up_dir.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(suffix=Path(video.filename or "").suffix.lower()[:8] or ".mp4", dir=up_dir)
+    tmp = Path(name)
+    try:
+        size = 0
+        with open(fd, "wb") as f:
+            while chunk := await video.read(1 << 20):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise HTTPException(413, "clip too large (200 MB max); a few seconds is enough")
+                f.write(chunk)
+        if size == 0:
+            raise HTTPException(400, "empty upload")
+        return await _cal.calibrate(tmp, ref_kind, _cal.parse_json(profile), _cal.parse_json(sensor), replay=replay)
+    except _analyze.AnalyzeError as e:
+        raise HTTPException(422, str(e)) from None
+    except _analyze.SpendCapError as e:
+        raise HTTPException(429, str(e)) from None
+    except _blur.BlurError as e:
+        raise HTTPException(503, f"faces could not be blurred, so nothing was sent: {e}") from None
+    finally:
+        tmp.unlink(missing_ok=True)

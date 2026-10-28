@@ -73,6 +73,53 @@
 
       <!-- Check a spot -->
       <div class="panel" id="panel-check" hidden>
+        <details class="calib" id="calib">
+          <summary><span>Calibrate (once)</span> <span class="calib-state" id="calib-state">Default assumptions</span></summary>
+          <form id="calib-form" novalidate>
+            <fieldset class="seg">
+              <legend>Wheelchair</legend>
+              <div class="seg-row">
+                <input type="radio" name="chair" id="ch-manual" value="manual" checked><label for="ch-manual">Manual</label>
+                <input type="radio" name="chair" id="ch-power" value="power"><label for="ch-power">Power</label>
+                <input type="radio" name="chair" id="ch-custom" value="custom"><label for="ch-custom">Custom</label>
+              </div>
+            </fieldset>
+            <div class="field-row">
+              <label class="field">Width, cm
+                <input type="number" id="cal-width" inputmode="decimal" min="40" max="100" step="1" value="65" aria-describedby="cal-width-hint">
+              </label>
+              <label class="field">Armrest height, cm
+                <input type="number" id="cal-armrest" inputmode="decimal" min="40" max="130" step="1" value="75">
+              </label>
+            </div>
+            <p class="hint" id="cal-width-hint">Typical: manual 60–70 cm, power 65–75 cm. Measure the widest point, wheels and push rims included.</p>
+            <label class="field">Phone model (optional)
+              <input type="text" id="cal-phone" maxlength="60" autocomplete="off" placeholder="e.g. Galaxy S24">
+            </label>
+            <label class="field">Main camera focal length, 35 mm equivalent (optional)
+              <input type="number" id="cal-focal" inputmode="decimal" min="10" max="80" step="0.5" placeholder="26">
+            </label>
+            <div class="row">
+              <button type="submit" class="btn primary small">Save profile</button>
+              <button type="button" class="btn small" id="cal-reset">Reset</button>
+            </div>
+            <fieldset class="calib-ref">
+              <legend>Film a reference once (optional, tightens every later check)</legend>
+              <div class="seg-row">
+                <input type="radio" name="refkind" id="rk-a4" value="a4x4" checked><label for="rk-a4">4 × A4, 2×2</label>
+                <input type="radio" name="refkind" id="rk-block" value="tactile_block"><label for="rk-block">1 tactile block</label>
+              </div>
+              <p class="hint">Lay it flat on the ground about 2 m ahead. Hold the phone where you usually do, at your armrest, and film 3 seconds.</p>
+              <input type="file" id="cal-clip" accept="video/*" capture="environment" aria-label="Reference clip">
+              <button type="button" class="btn small" id="cal-run" disabled>Solve height and tilt</button>
+            </fieldset>
+            <p class="status" id="calib-status" role="status" aria-live="polite"></p>
+          </form>
+        </details>
+        <div class="row tilt-row" id="tilt-row" hidden>
+          <button type="button" class="btn small" id="tilt-btn" aria-pressed="false">Use phone tilt</button>
+          <span class="hint" id="tilt-state">Tilt sensor off: tilt is estimated from the clip.</span>
+        </div>
         <ol class="steps">
           <li>
             <label class="step-label" for="clip">1. Film about 10 seconds at seated height, or choose a clip</label>
@@ -110,6 +157,7 @@
             <div><dt>Measured gap</dt><dd id="v-gap">—</dd></div>
             <div><dt>Likely range</dt><dd id="v-band">—</dd></div>
           </dl>
+          <p class="assume" id="v-assume" hidden><span class="assume-tag" id="v-assume-tag"></span> <span id="v-assume-text"></span></p>
           <p class="why" id="v-why"></p>
           <p class="explain" id="v-explain"></p>
           <p class="model" id="v-model"></p>

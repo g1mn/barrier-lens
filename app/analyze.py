@@ -35,7 +35,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from app import blur, geometry, pipeline, sam, spark
+from app import blur, calibration, geometry, pipeline, sam, spark
 from app.config import key
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -324,8 +324,14 @@ def _unknown(why: str) -> dict:
 
 async def analyze(video_path: str | Path, lat: float | None, lon: float | None, replay: bool = False, *,
                   concepts_hint: list[str] | None = None, fixture_sha: str | None = None,
-                  require_seated_height: bool = True, sample: bool = False) -> dict:
+                  require_seated_height: bool = True, sample: bool = False, profile: dict | None = None,
+                  sensor: dict | None = None) -> dict:
     """Run the whole check on one clip. See the module docstring.
+
+    profile: the user's calibration profile (app.calibration.clean_profile fields: chair width, armrest height,
+    phone FOV, one-time calibration). sensor: averaged DeviceOrientation beta/gamma/angle/n from the page. With no
+    reference in the clip, the gap is measured from the camera_pose built from these (calibration.camera_pose);
+    result["assumptions"] says which mode was used ("reference", "calibrated", "default").
 
     concepts_hint: barrier concepts to use when triage has no answer in replay mode (sample clips).
     fixture_sha: replay SAM fixtures recorded for this source-clip hash when the blurred clip has none.
@@ -339,6 +345,9 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
     if not src.is_file():
         raise AnalyzeError("video file not found")
 
+    prof = calibration.clean_profile(profile)
+    hints = await calibration.clip_hints(src)
+    chair_cm, chair_src = calibration.chair_width_cm(prof, geometry.DEFAULT_WHEELCHAIR_CM)
     clip, blur_counts, job = await prepare(src)
     info = clip_info(clip)
     timings["prepare_s"] = round(time.monotonic() - t0, 2)
@@ -405,27 +414,33 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
     # geometry
     t = time.monotonic()
     merged = merge_barriers(bar_results)
+    pose = calibration.camera_pose(prof, sensor, hints, size)
+    mode = "reference" if ref_result.get("frames") else pose["source"]
     if not merged["frames"]:
         m = _unknown("No barrier was segmented in the clip, so there is nothing to measure.")
-    elif not ref_result.get("frames"):
-        m = _unknown(f"No ground reference was found ({ref_concept}), so the gap cannot be measured in "
-                     "centimetres. Put four A4 sheets flat on the ground near the gap, or film tactile paving.")
+    elif mode != "reference":
+        m = await asyncio.to_thread(calibration.measure_with_pose, geometry, merged, pose, chair_cm)
+        m.setdefault("detail", {})["reference"] = {"concept": None, **pose}
     else:
-        m = await asyncio.to_thread(pipeline.measure_from_sam, merged, ref_result, ref_kind(ref_concept))
+        m = await asyncio.to_thread(pipeline.measure_from_sam, merged, ref_result, ref_kind(ref_concept),
+                                    wheelchair_cm=chair_cm)
         m.setdefault("detail", {})["reference"] = {"concept": ref_concept, **ref_kind(ref_concept)}
     timings["measure_s"] = round(time.monotonic() - t, 2)
+    assumptions = {"mode": mode, "label": calibration.LABELS[mode], "chair_width_cm": chair_cm,
+                   "chair_source": chair_src, "pose": None if mode == "reference" else pose, "clip_hints": hints,
+                   "main": calibration.assumption_text(mode, pose, chair_cm, chair_src, ref_concept)}
 
     # explanation
     t = time.monotonic()
     ex_in = {k: m.get(k) for k in ("gap_cm", "band_cm", "verdict", "why")}
-    ex_in.update({"chair_width_cm": geometry.DEFAULT_WHEELCHAIR_CM, "barrier": ", ".join(barriers) or None})
+    ex_in.update({"chair_width_cm": chair_cm, "barrier": ", ".join(barriers) or None})
     ex = await _explain(ex_in, replay)
     models["explain"] = ex.get("model")
     timings["explain_s"] = round(time.monotonic() - t, 2)
 
     masks = [mask_track(r, "barrier") for r in bar_results] + [mask_track(ref_result, "reference")]
     timings["total_s"] = round(time.monotonic() - t0, 2)
-    return _result(base, m, ex, tri, masks, models, timings, notes, sam_frames)
+    return {**_result(base, m, ex, tri, masks, models, timings, notes, sam_frames), "assumptions": assumptions}
 
 
 def _result(base, m, ex, tri, masks, models, timings, notes, sam_frames) -> dict:
@@ -473,13 +488,14 @@ def _sample_source(only_sha: str | None = None) -> tuple[Path, str, list[str]] |
     return None if best is None else (best[1], best[2], best[3])
 
 
-async def run_sample(lat: float | None = None, lon: float | None = None, only_sha: str | None = None) -> dict:
+async def run_sample(lat: float | None = None, lon: float | None = None, only_sha: str | None = None,
+                     profile: dict | None = None, sensor: dict | None = None) -> dict:
     """Sample check in replay mode on a local dev clip with fixtures; else the precomputed JSON."""
     src = _sample_source(only_sha)
     if src is not None:
         clip, sha, concepts = src
         out = await analyze(clip, lat, lon, replay=True, concepts_hint=concepts, fixture_sha=sha,
-                            require_seated_height=False, sample=True)
+                            require_seated_height=False, sample=True, profile=profile, sensor=sensor)
         out["sample_source"] = {"clip": clip.name, "fixture_clip_sha256": sha}
         return out
     if SAMPLE_FALLBACK.exists():

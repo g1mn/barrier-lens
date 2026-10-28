@@ -267,3 +267,28 @@ input[type="file"]::file-selector-button {
 .verdict:focus { outline: none; }
 .verdict:focus-visible { outline: 3px solid var(--v); outline-offset: 3px; }
 [hidden] { display: none !important; }  /* .btn and friends set display, which would otherwise beat the hidden attribute */
+
+/* ---- calibration (role: calibration-ui) ---- */
+.calib { border: 2px solid var(--line); border-radius: var(--radius); padding: 0 12px; margin: 0 0 12px; background: var(--surface); }
+.calib > summary { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; font-weight: 650; list-style: none; }
+.calib > summary::-webkit-details-marker { display: none; }
+.calib > summary::after { content: "+"; font-size: 1.3rem; color: var(--muted); }
+.calib[open] > summary::after { content: "\2212"; }
+.calib > summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 8px; }
+.calib form { padding-bottom: 12px; }
+.calib-state { margin-left: auto; font-size: .8rem; font-weight: 650; padding: 3px 8px; border-radius: 999px; background: var(--unk-bg); color: var(--unk); word-break: keep-all; }
+.calib-state[data-mode="calibrated"] { background: var(--ok-bg); color: var(--ok); }
+.calib-state[data-mode="saved"] { background: var(--warn-bg); color: var(--warn); }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.field { display: grid; gap: 4px; margin-top: 10px; font-size: .9rem; font-weight: 600; min-width: 0; }
+.field input { min-height: 44px; width: 100%; box-sizing: border-box; padding: 8px 10px; font: inherit; font-weight: 500; color: var(--text); background: var(--bg); border: 2px solid var(--line); border-radius: 10px; }
+.field input:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+.calib .row { margin-top: 12px; }
+.calib-ref { border: 1px dashed var(--line); border-radius: 12px; margin: 14px 0 0; padding: 8px 10px 12px; min-width: 0; }
+.calib-ref legend { font-weight: 650; padding: 0 4px; font-size: .9rem; }
+.calib-ref .seg-row { grid-template-columns: 1fr 1fr; }
+.calib-ref input[type=file] { margin: 10px 0; max-width: 100%; }
+.tilt-row { margin: 0 0 12px; }
+.assume { margin: 10px 0 0; font-size: .92rem; word-break: keep-all; }
+.assume-tag { display: inline-block; font-weight: 700; font-size: .8rem; padding: 2px 8px; border-radius: 999px; background: var(--unk-bg); color: var(--unk); border: 1px solid currentColor; }
+.assume[data-mode="calibrated"] .assume-tag, .assume[data-mode="reference"] .assume-tag { background: var(--ok-bg); color: var(--ok); }

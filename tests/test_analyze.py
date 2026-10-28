@@ -131,7 +131,11 @@ def test_replay_miss_is_unknown_not_an_error(env, clip_src):
 def test_no_reference_is_unknown(env, scene, clip_src):
     _write_sam_fixture(env / "fixtures", "bollard", scene["barrier_masks"], scene["frame_size"])
     r = asyncio.run(analyze.analyze(clip_src, None, None, replay=True, concepts_hint=["bollard"]))
-    assert r["verdict"] == "unknown" and "reference" in r["why"]
+    # no reference in the clip: measured from the default camera pose (or "unknown" until geometry supports it)
+    a = r["assumptions"]
+    assert a["mode"] == "default" and a["label"] == "Estimated with default assumptions"
+    assert a["pose"]["kind"] == "camera_pose" and a["pose"]["height_range_m"] == [0.65, 0.90]
+    assert r["verdict"] == "unknown" or r["band_cm"] is not None
     assert any(m["frames"] for m in r["masks"] if m["concept"] == "bollard")
 
 
@@ -186,3 +190,105 @@ def test_sample_route_answers(env, monkeypatch):
     assert j["sample"] is True and j["replay"] is True and j["cost"]["sam_frames"] == 0
     assert j["verdict"] in {"passes", "tight", "blocked", "unknown"}
     assert any(m["frames"] for m in j["masks"])
+
+
+# ---------------------------------------------------------------- profile / calibration (role: calibration-ui)
+
+from app import calibration  # noqa: E402
+
+PROFILE = {"chair_type": "custom", "chair_width_cm": 95, "armrest_height_cm": 80, "phone_model": "test phone",
+           "junk": "dropped"}
+
+
+def test_clean_profile_drops_junk_and_bad_values():
+    p = calibration.clean_profile({**PROFILE, "hfov_deg": 500, "calibration": {"height_m": 9}})
+    assert p == {"chair_type": "custom", "chair_width_cm": 95.0, "armrest_height_cm": 80.0, "phone_model": "test phone"}
+    assert calibration.clean_profile({"chair_type": "power"})["chair_width_cm"] == 70.0
+    assert calibration.clean_profile(None) == {}
+    assert calibration.parse_json("not json") is None and calibration.parse_json("[1]") is None
+
+
+def test_sensor_pose_portrait_landscape_and_too_few_samples():
+    assert calibration.sensor_pose({"beta": 70, "gamma": 2, "angle": 0, "n": 30}) == \
+        {"pitch_deg": 20.0, "roll_deg": 2.0, "samples": 30}
+    assert calibration.sensor_pose({"beta": 3, "gamma": -72, "angle": 90, "n": 30})["pitch_deg"] == 18.0
+    assert calibration.sensor_pose({"beta": 70, "gamma": 2, "n": 2}) is None
+    assert calibration.sensor_pose(None) is None
+
+
+def test_camera_pose_sources():
+    size = (1280, 720)
+    d = calibration.camera_pose({}, None, {}, size)
+    assert d["source"] == "default" and d["height_m"] == 0.75 and d["pitch_deg"] is None
+    lo, hi = d["hfov_range_deg"]
+    assert lo < d["hfov_deg"] < hi and 60 < d["hfov_deg"] < 75   # 26 mm equivalent on the long side
+    portrait = calibration.camera_pose({}, None, {}, (720, 1280))
+    assert portrait["hfov_deg"] < d["hfov_deg"]
+    p = calibration.camera_pose(calibration.clean_profile(PROFILE), {"beta": 70, "gamma": 0, "n": 9}, {}, size)
+    assert p["height_m"] == 0.8 and p["pitch_deg"] == 20.0 and p["pitch_sd_deg"] == calibration.SENSOR_PITCH_SD_DEG
+    meta = calibration.camera_pose({}, None, {"focal_35mm": 24.0}, size)
+    assert meta["sources"]["hfov"] == "clip metadata" and meta["hfov_deg"] > d["hfov_deg"]
+    cal = calibration.clean_profile({"calibration": {"height_m": 0.71, "pitch_bias_deg": 1.5, "hfov_deg": 65}})
+    c = calibration.camera_pose(cal, {"beta": 70, "gamma": 0, "n": 9}, {}, size)
+    assert c["source"] == "calibrated" and c["height_m"] == 0.71 and c["pitch_deg"] == 21.5
+    assert c["pitch_sd_deg"] == calibration.CALIBRATED_PITCH_SD_DEG and c["hfov_deg"] == 65
+
+
+def test_solve_pose_recovers_the_synthetic_camera(scene):
+    from app import geometry
+    for corners in (scene["ref_corners_true"], geometry.find_reference_corners(scene["ref_mask"])):
+        s = calibration.solve_pose(corners, "a4x4", scene["frame_size"], 65.0)
+        assert abs(s["height_m"] - 0.75) < 0.03, s
+        assert abs(s["pitch_deg"] - scene["pitch_deg"]) < 1.0, s
+
+
+def test_reference_mode_uses_profile_chair_width(env, scene, clip_src):
+    _write_sam_fixture(env / "fixtures", "bollard", scene["barrier_masks"], scene["frame_size"])
+    _write_sam_fixture(env / "fixtures", "paper", [scene["ref_mask"]], scene["frame_size"])
+    asyncio.run(_seed_triage(clip_src))
+    r = asyncio.run(analyze.analyze(clip_src, None, None, replay=True, profile=PROFILE))
+    a = r["assumptions"]
+    assert a["mode"] == "reference" and a["chair_width_cm"] == 95 and a["chair_source"] == "profile"
+    assert r["verdict"] in {"tight", "blocked"}, r  # 90 cm gap is "passes" for the default 70 cm chair
+    assert "95 cm" in a["main"]
+
+
+def test_calibrate_replay_solves_height_and_bias(env, scene, clip_src):
+    _write_sam_fixture(env / "fixtures", "paper", [scene["ref_mask"]], scene["frame_size"])
+    sensor = {"beta": 90 - (scene["pitch_deg"] - 2.0), "gamma": 0, "angle": 0, "n": 20}
+    r = asyncio.run(calibration.calibrate(clip_src, "a4x4", {"hfov_deg": 65}, sensor, replay=True))
+    assert r["ok"], r
+    c = r["calibration"]
+    assert abs(c["height_m"] - 0.75) < 0.03 and abs(c["pitch_bias_deg"] - 2.0) < 1.0
+    assert r["hfov_source"] == "profile" and not (env / "ledger.jsonl").exists()
+    # the stored result goes back in as the profile: next check is "calibrated"
+    pose = calibration.camera_pose(calibration.clean_profile({"calibration": c}), sensor, {}, scene["frame_size"])
+    assert pose["source"] == "calibrated" and abs(pose["pitch_deg"] - scene["pitch_deg"]) < 1.0
+
+
+def test_calibrate_without_reference_says_why(env, clip_src):
+    r = asyncio.run(calibration.calibrate(clip_src, "tactile_block", None, None, replay=True))
+    assert r["ok"] is False and "not found" in r["why"]
+
+
+def test_profile_routes(env, scene, clip_src):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    _write_sam_fixture(env / "fixtures", "bollard", scene["barrier_masks"], scene["frame_size"])
+    _write_sam_fixture(env / "fixtures", "paper", [scene["ref_mask"]], scene["frame_size"])
+    asyncio.run(_seed_triage(clip_src))
+    c = TestClient(app)
+    with clip_src.open("rb") as f:
+        r = c.post("/api/analyze", files={"video": ("clip.mp4", f, "video/mp4")},
+                   data={"lat": "37.484", "lon": "127.034", "replay": "true", "profile": json.dumps(PROFILE),
+                         "sensor": json.dumps({"beta": 70, "gamma": 1, "angle": 0, "n": 12})})
+    assert r.status_code == 200, r.text
+    assert r.json()["assumptions"]["chair_width_cm"] == 95
+    with clip_src.open("rb") as f:
+        k = c.post("/api/calibrate", files={"video": ("ref.mp4", f, "video/mp4")},
+                   data={"ref_kind": "a4x4", "replay": "true", "profile": json.dumps({"hfov_deg": 65})})
+    assert k.status_code == 200 and k.json()["ok"], k.text
+    assert not list((env / "analyze" / "uploads").iterdir())
+    with clip_src.open("rb") as f:
+        bad = c.post("/api/calibrate", files={"video": ("ref.mp4", f, "video/mp4")}, data={"ref_kind": "coin"})
+    assert bad.status_code == 422
