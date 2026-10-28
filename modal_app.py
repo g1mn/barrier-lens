@@ -25,8 +25,9 @@ image = (
 app = modal.App("barrier-lens", image=image)
 
 
+# max_containers: the spend cap and ledger live on each container's disk, so at most two caps can be spent at once
 @app.function(secrets=[modal.Secret.from_name("barrier-lens")], cpu=4.0, memory=2048, timeout=900,
-              scaledown_window=300)
+              scaledown_window=300, max_containers=2)
 @modal.concurrent(max_inputs=4)
 @modal.asgi_app()
 def web():
