@@ -513,8 +513,8 @@
 
   const BAR_MAX_CM = 300;  // ranges beyond this are drawn to the edge and labelled "over 3 m"
   function bandText(b) {
-    const hi = b[1] > BAR_MAX_CM ? `over ${BAR_MAX_CM / 100} m` : `${Math.round(b[1])} cm`;
-    return `${Math.round(b[0])} cm – ${hi}`;
+    if (b[1] > BAR_MAX_CM) return `${Math.round(b[0])} cm – over ${BAR_MAX_CM / 100} m`;
+    return `${Math.round(b[0])}–${Math.round(b[1])} cm`;   // short enough for a half-width tile on a phone
   }
   // One bar: the measured range against the chair width and the width needed with clearance.
   function renderBar(r) {

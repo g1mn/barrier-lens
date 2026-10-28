@@ -246,7 +246,7 @@ input[type="file"]::file-selector-button {
 .nums { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 8px; }
 .nums div { background: var(--surface); border-radius: 10px; padding: 8px 10px; border: 1px solid var(--line); }
 .nums dt { font-size: .78rem; color: var(--muted); }
-.nums dd { margin: 0; font-size: 1.35rem; font-weight: 750; font-variant-numeric: tabular-nums; }
+.nums dd { margin: 0; font-size: 1.35rem; font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .why { margin: 4px 0; font-size: .92rem; color: var(--muted); }
 .explain { margin: 6px 0; font-size: 1.02rem; }
 .model { margin: 4px 0 12px; font-size: .78rem; color: var(--muted); }
