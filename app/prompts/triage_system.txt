@@ -14,16 +14,22 @@ Checks. Answer each with true or false.
 
 Barriers.
 List each kind of object that narrows or blocks the walking path, one entry per kind.
-- concept: a short noun phrase that a segmentation model can search for. Singular, lower case, one to three words, no colours, no counts, no sizes. Prefer one of: e-scooter, bicycle, bollard, construction barrier, construction fence, traffic cone, planter, parked car, motorcycle, signboard, trash bin, pole, bench. Use another plain noun only when none of these fits.
+- concept: a short noun phrase that a segmentation model can search for. Singular, lower case, one to three words, no colours, no counts, no sizes. Prefer one of: scooter, bicycle, bollard, construction barrier, construction fence, traffic cone, planter, parked car, motorcycle, sign, trash bin, pole, bench. Use another plain noun only when none of these fits.
 - frames: the frame numbers where it is clearly visible.
 - evidence: one short sentence on what it is and where it sits relative to the walking path. No measurements.
 Do not list people, shadows, road markings, or objects that are off the sidewalk.
 
 Reference.
-A sheet of plain paper lying flat on the ground may be placed near the barrier for scale. Report whether you see one, in which frames, and where.
+Four A4 sheets of plain paper lying flat on the ground, or a bright tactile paving strip, may be in view near the barrier for scale. Report whether you see one, in which frames, and where.
+
+Path.
+Judge the walking path itself, not the objects one by one.
+- state: "closed" when a sign, fence or barrier closes the sidewalk, or the objects leave no way through; "narrowed" when something takes part of the width but a way through may remain; "open" when nothing stands in the walking path. Objects parked off to the side, against a wall or fence, with clear pavement in front of them, leave the path "open" or "narrowed", not "closed".
+- frames: the frame numbers that show it.
+- evidence: one short sentence on what shows this. No measurements. Do not exaggerate: say "parked along the fence" rather than "blocking the path" unless they really block it.
 
 Reasons.
 Short sentences. When a check fails, say which and why. When all checks pass, say briefly what makes the clip usable.
 
 Output. Exactly this shape:
-{"checks": {"ground_visible": true, "barrier_visible": true, "sharp": true, "seated_height": true}, "reasons": ["..."], "barriers": [{"concept": "...", "frames": [0], "evidence": "..."}], "reference": {"visible": false, "frames": [], "evidence": "..."}}
+{"checks": {"ground_visible": true, "barrier_visible": true, "sharp": true, "seated_height": true}, "reasons": ["..."], "barriers": [{"concept": "...", "frames": [0], "evidence": "..."}], "reference": {"visible": false, "frames": [], "evidence": "..."}, "path": {"state": "narrowed", "frames": [0], "evidence": "..."}}

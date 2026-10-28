@@ -338,12 +338,38 @@ UNKNOWN_CAUSES = {
              "Hold the phone level when you film.", ("level", "side", "lean", "수평", "기울")),
     "mask edges": ("the edges of the barriers were hard to pin down, so the gap could be anywhere from {lo} to {hi} cm",
                    "Film a little closer and hold the phone steady.", ("edge", "가장자리")),
+    # not an error source: a pass from default assumptions alone is held back (apply_path_and_mode)
+    "default_pass": ("this was measured from default assumptions only (no tilt reading, reference or calibration), and "
+                     "we only say a chair fits when one of those confirms it",
+                     "Turn on 'Use phone tilt' and film again, or put four A4 sheets flat on the ground near the gap.",
+                     ("default", "assum", "confirm", "tilt", "가정", "기울")),
 }
+
+
+def apply_path_and_mode(m: dict, tri: dict | None, mode: str) -> dict:
+    """Models may only make a verdict more cautious, never more hopeful.
+    - Muse Spark saw the sidewalk closed: blocked, whatever the geometry measured (its numbers move to detail).
+    - A pass measured from default assumptions alone (no reference, tilt sensor or calibration) is not reported as a
+      pass: the gap may be between the wrong objects and nothing confirmed the scale. It becomes unknown with that cause.
+    """
+    d = dict(m.get("detail") or {})
+    path = (tri or {}).get("path") or {}
+    if path.get("state") == "closed" and m.get("verdict") != "blocked":
+        d.update({"override": "path_closed", "geometry": {k: m.get(k) for k in ("verdict", "gap_cm", "band_cm", "why")}})
+        return {**m, "verdict": "blocked", "gap_cm": None, "band_cm": None, "detail": d,
+                "why": "Muse Spark saw the sidewalk closed (" + (path.get("evidence") or "no detail") + "), so the "
+                       "measured gap is not used"}
+    if mode == "default" and m.get("verdict") == "passes":
+        d.update({"capped": "default_pass", "geometry": {"verdict": "passes"}})
+        return {**m, "verdict": "unknown", "detail": d,
+                "why": f"{m.get('why')}; not reported as a pass because it was measured from default assumptions only"}
+    return m
 
 
 def unknown_cause(m: dict) -> dict | None:
     """{"reason", "next_step", "keywords"} for a band too wide to decide, or None (not unknown, or no gap at all)."""
-    band, dom = m.get("band_cm"), (m.get("detail") or {}).get("dominant_error")
+    d = m.get("detail") or {}
+    band, dom = m.get("band_cm"), d.get("capped") or d.get("dominant_error")
     if m.get("verdict") != "unknown" or not band or dom not in UNKNOWN_CAUSES:
         return None
     reason, step, words = UNKNOWN_CAUSES[dom]
@@ -463,9 +489,16 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
         m = await asyncio.to_thread(calibration.measure_with_pose, geometry, merged, pose, chair_cm)
         m.setdefault("detail", {})["reference"] = {"concept": None, **pose}
     else:
+        # pose too: when the reference never shares a frame with the barriers this falls back to the camera pose,
+        # which must be the user's calibrated / sensor pose, not the default
         m = await asyncio.to_thread(pipeline.measure_from_sam, merged, ref_result, ref_kind(ref_concept),
-                                    wheelchair_cm=chair_cm)
-        m.setdefault("detail", {})["reference"] = {"concept": ref_concept, **ref_kind(ref_concept)}
+                                    pose=pose, wheelchair_cm=chair_cm)
+        if (m.get("detail") or {}).get("fallback") == "camera_pose":
+            mode = pose["source"]
+            m["detail"]["reference"] = {"concept": None, **pose}
+        else:
+            m.setdefault("detail", {})["reference"] = {"concept": ref_concept, **ref_kind(ref_concept)}
+    m = apply_path_and_mode(m, tri, mode)
     timings["measure_s"] = round(time.monotonic() - t, 2)
     assumptions = {"mode": mode, "label": calibration.LABELS[mode], "chair_width_cm": chair_cm,
                    "chair_source": chair_src, "pose": None if mode == "reference" else pose, "clip_hints": hints,

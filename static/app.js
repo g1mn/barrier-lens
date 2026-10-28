@@ -446,6 +446,57 @@
     }));
   }
 
+
+  const BAR_MAX_CM = 300;  // ranges beyond this are drawn to the edge and labelled "over 3 m"
+  function bandText(b) {
+    const hi = b[1] > BAR_MAX_CM ? `over ${BAR_MAX_CM / 100} m` : `${Math.round(b[1])} cm`;
+    return `${Math.round(b[0])} cm – ${hi}`;
+  }
+  // One bar: the measured range against the chair width and the width needed with clearance.
+  function renderBar(r) {
+    const fig = $('#v-bar');
+    const band = Array.isArray(r.band_cm) ? r.band_cm : null;
+    const d = r.measurement_detail || {};
+    const chair = (r.assumptions && r.assumptions.chair_width_cm) || d.wheelchair_cm || 70;
+    const need = chair + 2 * (d.clearance_cm ?? 5);
+    if (!band) { fig.hidden = true; return; }
+    const max = Math.min(BAR_MAX_CM, Math.max(band[1], need) * 1.15);
+    const x = (cm) => 8 + (Math.min(cm, max) / max) * 304;
+    const svg = $('#v-bar-svg');
+    svg.innerHTML =
+      `<rect x="8" y="26" width="304" height="12" rx="6" class="bar-track"/>`
+      + `<rect x="${x(band[0])}" y="22" width="${Math.max(3, x(band[1]) - x(band[0]))}" height="20" rx="5" class="bar-band"/>`
+      + (r.gap_cm != null ? `<line x1="${x(r.gap_cm)}" x2="${x(r.gap_cm)}" y1="18" y2="46" class="bar-gap"/>` : '')
+      + `<line x1="${x(chair)}" x2="${x(chair)}" y1="8" y2="56" class="bar-chair"/>`
+      + `<line x1="${x(need)}" x2="${x(need)}" y1="8" y2="56" class="bar-need"/>`;
+    $('#v-bar-cap').innerHTML = `<span class="k band">Measured range ${esc(bandText(band))}</span>`
+      + `<span class="k chair">Your chair ${Math.round(chair)} cm</span><span class="k need">Needed with room ${Math.round(need)} cm</span>`;
+    fig.hidden = false;
+  }
+  function renderNotes(r) {
+    const notes = (r.notes || []).filter(Boolean);
+    const ul = $('#v-notes');
+    ul.innerHTML = notes.map((n) => `<li>${esc(n)}</li>`).join('');
+    ul.hidden = !notes.length;
+  }
+  // What Muse Spark saw (path state, evidence) next to what SAM 3.1 outlined; says so when they disagree.
+  const PATH_WORD = { open: 'Path looks open', narrowed: 'Path is narrowed', closed: 'Path is closed' };
+  function renderSaw(r) {
+    const tri = r.triage || {};
+    const sec = $('#v-saw');
+    if (r.handmade || tri.usable == null) { sec.hidden = true; return; }
+    const p = tri.path || {};
+    $('#v-path').textContent = p.state ? `${PATH_WORD[p.state] || p.state} — ${p.evidence || ''}` : '';
+    const sam = Object.fromEntries(toTracks(r).map((t) => [t.concept, t.frames.length]));
+    const rows = (tri.barriers || []).map((b) => {
+      const n = sam[b.concept];
+      const outl = n ? `SAM 3.1 outlined it in ${n} frames` : (n === 0 ? 'SAM 3.1 found no outline for it, so it is not measured' : '');
+      return `<li><b>${esc(b.concept)}</b> — ${esc(b.evidence)}${outl ? ` <span class="${n ? 'ok' : 'miss'}">${esc(outl)}</span>` : ''}</li>`;
+    });
+    $('#v-saw-list').innerHTML = rows.join('');
+    sec.hidden = !(rows.length || p.state);
+  }
+
   function renderVerdict(result, sample) {
     const tri = result.triage;
     const verdict = VERDICT_WORD[result.verdict] ? result.verdict : 'unknown';
@@ -457,10 +508,16 @@
     kicker.textContent = result.handmade ? 'Sample · hand-made, not a measurement'
       : sample ? 'Sample clip · replayed model results' : 'Measured from your clip';
     kicker.classList.toggle('sample', sample);
+    // unknown: the middle of a too-wide range is not an answer, so it is shown as a best guess, not a headline
+    $('#v-nums').classList.toggle('weak', verdict === 'unknown');
+    $('#v-gap-label').textContent = verdict === 'unknown' ? 'Best guess (not an answer)' : 'Measured gap';
     $('#v-gap').textContent = result.gap_cm == null ? '—' : `${Math.round(result.gap_cm)} cm`;
-    $('#v-band').textContent = Array.isArray(result.band_cm) ? `${Math.round(result.band_cm[0])}–${Math.round(result.band_cm[1])} cm` : '—';
+    $('#v-band').textContent = Array.isArray(result.band_cm) ? bandText(result.band_cm) : '—';
     renderAssumptions(result);
-    $('#v-why').textContent = result.why || '';
+    renderBar(result);
+    renderNotes(result);
+    renderSaw(result);
+    $('#v-why').textContent = (result.why || '').replace(/\(default \((.*?)\)\)/g, '($1)');
     $('#v-explain').textContent = typeof result.explanation === 'string' ? result.explanation : (result.explanation?.text || '');
     const md = result.models || {};
     const srcs = [...new Set(toTracks(result).map((t) => t.source).filter(Boolean))].join(', ');

@@ -347,9 +347,10 @@ def test_live_checks_need_the_demo_token_when_set(env, clip_src, monkeypatch):
     assert r.status_code == 401
     r = c.post("/api/calibrate", files=files)
     assert r.status_code == 401
-    # replay never costs anything, so it stays open
+    # replay uploads also run ffmpeg and the blur on the server, so they need the token too; the sample stays open
     r = c.post("/api/analyze", files=files, data={"lat": "37.48", "lon": "127.03", "replay": "true"})
-    assert r.status_code == 200
+    assert r.status_code == 401
+    assert c.get("/api/sample").status_code == 200
 
 
 def test_blur_tiles_cover_the_frame_and_bound_the_detector_input():
@@ -388,3 +389,31 @@ def test_spark_retry_never_sends_an_empty_assistant_turn(monkeypatch):
     retry_msgs, retry_tokens = seen[1]
     assert all(m.get("content") for m in retry_msgs if m["role"] == "assistant")
     assert retry_tokens == spark.RETRY_MAX_TOKENS
+
+
+def test_models_may_only_make_a_verdict_more_cautious():
+    passes = {"verdict": "passes", "gap_cm": 162.0, "band_cm": [140.0, 180.0], "why": "narrowest point 162 cm",
+              "detail": {"dominant_error": "tilt"}}
+    closed = analyze.apply_path_and_mode(passes, {"path": {"state": "closed", "evidence": "a SIDEWALK CLOSED sign"}}, "sensor")
+    assert closed["verdict"] == "blocked" and closed["gap_cm"] is None and closed["band_cm"] is None
+    assert "SIDEWALK CLOSED" in closed["why"] and closed["detail"]["geometry"]["gap_cm"] == 162.0
+    capped = analyze.apply_path_and_mode(passes, {"path": {"state": "open", "evidence": "clear"}}, "default")
+    assert capped["verdict"] == "unknown" and capped["detail"]["capped"] == "default_pass"
+    cause = analyze.unknown_cause(capped)
+    assert "default assumptions" in cause["reason"] and "tilt" in cause["next_step"].lower()
+    # a confirmed scale (tilt sensor, calibration or a reference) keeps the pass; "narrowed" changes nothing
+    assert analyze.apply_path_and_mode(passes, {"path": {"state": "narrowed", "evidence": "x"}}, "sensor") is passes
+    assert analyze.apply_path_and_mode(passes, None, "reference") is passes
+
+
+def test_triage_needs_a_path_state_with_evidence_for_closed():
+    base = {"checks": {k: True for k in spark.CHECKS}, "reasons": ["ok"],
+            "barriers": [{"concept": "sign", "frames": [0], "evidence": "a closure sign"}],
+            "reference": {"visible": False, "frames": [], "evidence": ""}}
+    _, errors, _ = spark._validate_triage(base, 6)
+    assert any("path" in e for e in errors)
+    _, errors, _ = spark._validate_triage({**base, "path": {"state": "closed", "frames": [0], "evidence": ""}}, 6)
+    assert any("closed" in e for e in errors)
+    clean, errors, _ = spark._validate_triage({**base, "path": {"state": "closed", "frames": [0, 2],
+                                                                "evidence": "SIDEWALK CLOSED sign across it"}}, 6)
+    assert not errors and clean["path"]["state"] == "closed"

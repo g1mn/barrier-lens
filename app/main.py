@@ -84,8 +84,7 @@ async def api_analyze(
     x_demo_token: str | None = Header(None, description="judge token, needed for live checks when BL_DEMO_TOKEN is set"),
 ) -> dict:
     """Upload a clip -> normalise, blur faces locally, triage, SAM, geometry, explanation (see app/analyze.py)."""
-    if not replay:
-        require_live_token(x_demo_token)
+    require_live_token(x_demo_token)  # replay uploads too: they still run ffmpeg and the face blur on this server
     up_dir = _analyze.WORK_DIR / "uploads"
     up_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(video.filename or "").suffix.lower()[:8] or ".mp4"
@@ -168,8 +167,7 @@ async def api_calibrate(
     x_demo_token: str | None = Header(None),
 ) -> dict:
     """One-time calibration: solve camera height and tilt from a reference of known size (app/calibration.py)."""
-    if not replay:
-        require_live_token(x_demo_token)
+    require_live_token(x_demo_token)
     up_dir = _analyze.WORK_DIR / "uploads"
     up_dir.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(suffix=Path(video.filename or "").suffix.lower()[:8] or ".mp4", dir=up_dir)

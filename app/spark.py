@@ -212,6 +212,10 @@ def _distances(s: str) -> list[str]:
 
 # ---------------------------------------------------------------- triage
 
+# open: nothing in the way; narrowed: something takes part of the width; closed: a sign, fence or barrier closes
+# the sidewalk, or objects leave no way through. "closed" makes the verdict blocked (models may only make it
+# more cautious, never more hopeful); see analyze.apply_path_and_mode.
+PATH_STATES = ("open", "narrowed", "closed")
 TRIAGE_SCHEMA = {
     "title": "barrier_triage",
     "schema": {
@@ -248,8 +252,18 @@ TRIAGE_SCHEMA = {
                 "required": ["visible", "frames", "evidence"],
                 "additionalProperties": False,
             },
+            "path": {
+                "type": "object",
+                "properties": {
+                    "state": {"type": "string", "enum": list(PATH_STATES)},
+                    "frames": {"type": "array", "items": {"type": "integer"}},
+                    "evidence": {"type": "string"},
+                },
+                "required": ["state", "frames", "evidence"],
+                "additionalProperties": False,
+            },
         },
-        "required": ["checks", "reasons", "barriers", "reference"],
+        "required": ["checks", "reasons", "barriers", "reference", "path"],
         "additionalProperties": False,
     },
 }
@@ -308,10 +322,18 @@ def _validate_triage(obj, n: int) -> tuple[dict, list[str], list[str]]:
         ref = {"visible": False, "frames": [], "evidence": ""}
     ref = {"visible": ref["visible"], "frames": _frame_list(ref.get("frames", []), n, "reference", errors),
            "evidence": str(ref.get("evidence", "")).strip()}
+    path = obj.get("path")
+    if not isinstance(path, dict) or path.get("state") not in PATH_STATES:
+        errors.append(f"path must be an object with state one of {', '.join(PATH_STATES)}")
+        path = {"state": None, "frames": [], "evidence": ""}
+    path = {"state": path["state"], "frames": _frame_list(path.get("frames", []), n, "path", errors),
+            "evidence": str(path.get("evidence", "")).strip()}
+    if path["state"] == "closed" and not path["evidence"]:
+        errors.append("path.evidence must say what shows the sidewalk is closed")
 
     clean = {"checks": {k: bool(checks.get(k)) for k in CHECKS}, "reasons": [r.strip() for r in reasons],
-             "barriers": list(merged.values()), "reference": ref}
-    texts = clean["reasons"] + [b["evidence"] for b in clean["barriers"]] + [ref["evidence"]]
+             "barriers": list(merged.values()), "reference": ref, "path": path}
+    texts = clean["reasons"] + [b["evidence"] for b in clean["barriers"]] + [ref["evidence"], path["evidence"]]
     dist = [d for t in texts for d in _distances(t)]
     dist_errors = [f"remove the measurement {d!r}; never state distances or sizes" for d in dist]
     return clean, errors, dist_errors
@@ -323,6 +345,8 @@ def _scrub(clean: dict) -> dict:
     for b in clean["barriers"]:
         b["evidence"] = sub(b["evidence"])
     clean["reference"]["evidence"] = sub(clean["reference"]["evidence"])
+    if clean.get("path"):
+        clean["path"]["evidence"] = sub(clean["path"]["evidence"])
     return clean
 
 
@@ -396,7 +420,7 @@ async def triage(frames_jpeg: list[bytes], meta: dict) -> dict:
         result["reasons"].append("No barrier was named, so there is nothing to measure.")
     idx = meta.get("frame_indices")
     if idx and len(idx) == n:
-        for item in result["barriers"] + [result["reference"]]:
+        for item in result["barriers"] + [result["reference"]] + ([result["path"]] if result.get("path") else []):
             item["frames"] = [idx[i] for i in item["frames"]]
     return {"usable": result.pop("usable"), "reasons": result.pop("reasons"), "barriers": result.pop("barriers"),
             "model": result.pop("model"), **result}

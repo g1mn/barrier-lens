@@ -292,3 +292,28 @@ input[type="file"]::file-selector-button {
 .assume { margin: 10px 0 0; font-size: .92rem; word-break: keep-all; }
 .assume-tag { display: inline-block; font-weight: 700; font-size: .8rem; padding: 2px 8px; border-radius: 999px; background: var(--unk-bg); color: var(--unk); border: 1px solid currentColor; }
 .assume[data-mode="calibrated"] .assume-tag, .assume[data-mode="reference"] .assume-tag { background: var(--ok-bg); color: var(--ok); }
+
+/* verdict card: explanation first, one range bar, technical note folded away */
+.verdict .explain { font-size: 1.08rem; font-weight: 600; margin: 0 0 10px; }
+.rangebar { margin: 0 0 10px; }
+.rangebar svg { width: 100%; height: 64px; display: block; }
+.rangebar .bar-track { fill: var(--line); }
+.rangebar .bar-band { fill: var(--v); opacity: .55; }
+.rangebar .bar-gap { stroke: var(--text); stroke-width: 2; }
+.rangebar .bar-chair { stroke: var(--text); stroke-width: 2; stroke-dasharray: 4 3; }
+.rangebar .bar-need { stroke: var(--accent); stroke-width: 3; }
+.rangebar figcaption { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: .82rem; color: var(--muted); }
+.rangebar .k::before { content: ""; display: inline-block; width: 14px; height: 4px; margin-right: 5px; vertical-align: middle; border-radius: 2px; }
+.rangebar .k.band::before { background: var(--v); opacity: .7; height: 8px; }
+.rangebar .k.chair::before { border-top: 2px dashed var(--text); height: 0; }
+.rangebar .k.need::before { background: var(--accent); }
+.nums.weak dd { font-size: 1.05rem; font-weight: 600; color: var(--muted); }
+.notes { margin: 8px 0; padding-left: 18px; font-size: .9rem; }
+.saw { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+.saw h4 { margin: 0 0 4px; font-size: .9rem; }
+.saw-path { margin: 0 0 4px; font-size: .9rem; }
+.saw ul { margin: 0; padding-left: 18px; font-size: .86rem; }
+.saw .ok { color: var(--ok); }
+.saw .miss { color: var(--warn); font-weight: 600; }
+.how { margin: 6px 0 10px; }
+.how summary { cursor: pointer; font-size: .88rem; color: var(--muted); }

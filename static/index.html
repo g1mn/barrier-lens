@@ -157,14 +157,27 @@
         <article class="verdict" id="verdict" hidden tabindex="-1" aria-live="polite" aria-labelledby="verdict-word">
           <p class="kicker" id="verdict-kicker"></p>
           <h3 class="verdict-word" id="verdict-word"><svg class="verdict-icon" aria-hidden="true"><use id="verdict-icon" href="#v-unknown"></use></svg><span id="verdict-text">Unknown</span></h3>
-          <dl class="nums">
-            <div><dt>Measured gap</dt><dd id="v-gap">—</dd></div>
+          <p class="explain" id="v-explain"></p>
+          <figure class="rangebar" id="v-bar" hidden aria-labelledby="v-bar-cap">
+            <svg viewBox="0 0 320 64" preserveAspectRatio="none" role="img" aria-hidden="true" id="v-bar-svg"></svg>
+            <figcaption id="v-bar-cap"></figcaption>
+          </figure>
+          <dl class="nums" id="v-nums">
+            <div><dt id="v-gap-label">Measured gap</dt><dd id="v-gap">—</dd></div>
             <div><dt>Likely range</dt><dd id="v-band">—</dd></div>
           </dl>
           <p class="assume" id="v-assume" hidden><span class="assume-tag" id="v-assume-tag"></span> <span id="v-assume-text"></span></p>
-          <p class="why" id="v-why"></p>
-          <p class="explain" id="v-explain"></p>
-          <p class="model" id="v-model"></p>
+          <ul class="notes" id="v-notes" hidden></ul>
+          <section class="saw" id="v-saw" hidden aria-labelledby="v-saw-h">
+            <h4 id="v-saw-h">What the Meta models saw</h4>
+            <p class="saw-path" id="v-path"></p>
+            <ul id="v-saw-list"></ul>
+          </section>
+          <details class="how">
+            <summary>How we measured</summary>
+            <p class="why" id="v-why"></p>
+            <p class="model" id="v-model"></p>
+          </details>
           <div class="row">
             <button type="button" class="btn primary" id="confirm-btn">Confirm this pin</button>
             <button type="button" class="btn" id="again-btn">Check another</button>
