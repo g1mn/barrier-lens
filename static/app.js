@@ -16,6 +16,20 @@
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode: ignore */ } },
   };
 
+  // Live (paid) checks on a public deploy need the judge token; the server says so in /api/health.
+  const TOKEN_KEY = 'bl-demo-token';
+  function liveHeaders() {
+    const t = ($('#demo-token') && $('#demo-token').value.trim()) || store.get(TOKEN_KEY) || '';
+    return t ? { 'X-Demo-Token': t } : {};
+  }
+  fetch('/api/health').then((r) => r.json()).then((h) => {
+    if (!h.live_needs_token) return;
+    $('#token-row').hidden = false;
+    const inp = $('#demo-token');
+    inp.value = store.get(TOKEN_KEY) || '';
+    inp.addEventListener('change', () => store.set(TOKEN_KEY, inp.value.trim()));
+  }).catch(() => { /* offline: the sample still works */ });
+
   // ------------------------------------------------------------------ theme
   const themeBtn = $('#theme-toggle');
   function applyTheme(t) {
@@ -275,7 +289,7 @@
     if (s) fd.append('sensor', JSON.stringify(s));
     $('#analyze-btn').disabled = true;
     setStatus('Blurring faces on this server, then measuring… this can take a minute.');
-    const result = await getJson('/api/analyze', { method: 'POST', body: fd });
+    const result = await getJson('/api/analyze', { method: 'POST', body: fd, headers: liveHeaders() });
     $('#analyze-btn').disabled = false;
     if (result) {
       useClip(result.video_url);
@@ -316,8 +330,10 @@
   function statusLine(r) {
     const b = r.blur || {};
     const faces = b.faces == null ? '' : ` Faces blurred before upload: ${b.faces} in ${b.frames_with_faces} of ${b.frames} frames.`;
-    const cost = r.cost ? ` Paid SAM frames this check: ${r.cost.sam_frames} ($${Number(r.cost.usd_estimate || 0).toFixed(2)}).` : '';
-    return `${r.sample ? 'Sample clip, replayed results (no live model calls).' : 'Done.'}${faces}${cost}`;
+    const cost = r.cost ? ` ${r.recorded ? 'SAM frames billed when it was recorded' : 'Paid SAM frames this check'}: ${r.cost.sam_frames} ($${Number(r.cost.usd_estimate || 0).toFixed(2)}).` : '';
+    const head = r.recorded ? `Recorded live run (${r.models.triage} and ${r.models.sam} on the Meta Model API, ${r.recorded.at.slice(0, 10)}), replayed with no model calls now.`
+      : r.sample ? 'Sample clip, replayed results (no live model calls).' : 'Done.';
+    return `${head}${faces}${cost}`;
   }
 
   $('#sample-btn').addEventListener('click', async () => {
@@ -699,7 +715,7 @@
     calStatus.textContent = 'Blurring faces, finding the reference, solving height and tilt…';
     let j = null;
     try {
-      const res = await fetch('/api/calibrate', { method: 'POST', body: fd });
+      const res = await fetch('/api/calibrate', { method: 'POST', body: fd, headers: liveHeaders() });
       j = await res.json().catch(() => null);
       if (!res.ok) throw new Error((j && typeof j.detail === 'string' && j.detail) || `HTTP ${res.status}`);
     } catch (e) {

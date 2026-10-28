@@ -321,3 +321,32 @@ def test_unknown_explanation_must_name_the_measured_cause(env, scene, clip_src, 
     assert "unclear" not in r["explanation"]
     assert any(w in r["explanation"].lower() for w in cause["keywords"])
     assert r["models"]["explain"] == "template"
+
+
+def test_sample_without_dev_clips_is_the_recorded_live_run(env):
+    """A deploy has no dev clips: the sample is the recorded live run, with its blurred clip on the server."""
+    from fastapi.testclient import TestClient
+    from app.main import app
+    c = TestClient(app)
+    j = c.get("/api/sample", params={"lat": 37.484, "lon": 127.034}).json()
+    assert j["recorded"]["note"].startswith("Recorded live run") and j["location"] == {"lat": 37.484, "lon": 127.034}
+    assert j["models"]["triage"] == "muse-spark-1.3" and j["models"]["sam"] == "sam-3.1"
+    assert c.get(j["video_url"]).status_code == 200
+
+
+def test_live_checks_need_the_demo_token_when_set(env, clip_src, monkeypatch):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    c = TestClient(app)
+    monkeypatch.setenv("BL_DEMO_TOKEN", "judge-secret")
+    assert c.get("/api/health").json()["live_needs_token"] is True
+    files = {"video": ("c.mp4", clip_src.read_bytes(), "video/mp4")}
+    r = c.post("/api/analyze", files=files, data={"lat": "37.48", "lon": "127.03"})
+    assert r.status_code == 401 and "judge token" in r.json()["detail"]
+    r = c.post("/api/analyze", files=files, data={"lat": "37.48", "lon": "127.03"}, headers={"X-Demo-Token": "nope"})
+    assert r.status_code == 401
+    r = c.post("/api/calibrate", files=files)
+    assert r.status_code == 401
+    # replay never costs anything, so it stays open
+    r = c.post("/api/analyze", files=files, data={"lat": "37.48", "lon": "127.03", "replay": "true"})
+    assert r.status_code == 200

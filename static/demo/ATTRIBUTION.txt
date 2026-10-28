@@ -1,0 +1,5 @@
+scooters-city-live.mp4 — first 10 s of "Urban Electric Scooters Parked in Cityscape" by FABIO REIS DE ABREU (PORTUGA),
+https://www.pexels.com/video/urban-electric-scooters-parked-in-cityscape-36383602/ (Pexels License: free to use and modify).
+Normalised to 10 fps and 1280x720, faces blurred on our server (OpenCV YuNet) before any model saw it.
+Licence plates are not detected automatically (no plate detector).
+scooters-city-live.json — the response of a live /api/analyze run on that clip, 2026-10-28 22:41 KST.

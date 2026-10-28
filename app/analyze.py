@@ -43,6 +43,7 @@ WORK_DIR = ROOT / "data" / "cache" / "analyze"
 LEDGER = ROOT / "data" / "cache" / "ledger.jsonl"
 SAMPLE_FALLBACK = ROOT / "data" / "fixtures" / "analyze" / "sample-scooters-row.json"
 SAMPLE_FALLBACK_SHA = "69bee8c8ddaaabb410898f49f41c998200fbbef5ef97c35b56db09bba20cef19"  # scooters-row, first 3 s
+DEMO_RUN = ROOT / "static" / "demo" / "scooters-city-live.json"  # a recorded live run with its blurred clip
 
 MAX_SECONDS = 10
 FPS = 10
@@ -549,13 +550,22 @@ def _sample_source(only_sha: str | None = None) -> tuple[Path, str, list[str]] |
 
 async def run_sample(lat: float | None = None, lon: float | None = None, only_sha: str | None = None,
                      profile: dict | None = None, sensor: dict | None = None) -> dict:
-    """Sample check in replay mode on a local dev clip with fixtures; else the precomputed JSON."""
+    """Sample check in replay mode on a local dev clip with fixtures; else the recorded live run (a deploy has no
+    dev clips); else the precomputed JSON."""
     src = _sample_source(only_sha)
     if src is not None:
         clip, sha, concepts = src
         out = await analyze(clip, lat, lon, replay=True, concepts_hint=concepts, fixture_sha=sha,
                             require_seated_height=False, sample=True, profile=profile, sensor=sensor)
         out["sample_source"] = {"clip": clip.name, "fixture_clip_sha256": sha}
+        return out
+    if DEMO_RUN.exists() and not only_sha:
+        out = json.loads(DEMO_RUN.read_text())
+        if lat is not None and lon is not None:
+            out["location"] = {"lat": lat, "lon": lon}
+        if profile or sensor:
+            out["notes"] = (out.get("notes") or []) + [
+                "This is a recorded run, so your calibration and tilt are not applied to it."]
         return out
     if SAMPLE_FALLBACK.exists():
         out = json.loads(SAMPLE_FALLBACK.read_text())

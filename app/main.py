@@ -1,6 +1,8 @@
+import hmac
+import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -9,9 +11,21 @@ app = FastAPI(title="Barrier Lens")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
+def _demo_token() -> str:
+    """Set BL_DEMO_TOKEN on a public deploy: live (paid) checks then need it; the recorded sample stays open."""
+    return os.environ.get("BL_DEMO_TOKEN", "").strip()
+
+
+def require_live_token(token: str | None) -> None:
+    want = _demo_token()
+    if want and not (token and hmac.compare_digest(token.strip().encode(), want.encode())):
+        raise HTTPException(401, "live checks on this public demo need the judge token (see the submission's "
+                                 "testing instructions); the recorded sample works without it")
+
+
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True}
+    return {"ok": True, "live_needs_token": bool(_demo_token())}
 
 
 @app.get("/")
@@ -50,7 +64,7 @@ def api_station(live: bool = False) -> dict:
 # ---- check routes (role: analyze-api) ---------------------------------------
 import tempfile  # noqa: E402
 
-from fastapi import File, Form, HTTPException, UploadFile  # noqa: E402
+from fastapi import File, Form, Header, HTTPException, UploadFile  # noqa: E402
 
 from app import analyze as _analyze  # noqa: E402
 from app import blur as _blur  # noqa: E402
@@ -67,8 +81,11 @@ async def api_analyze(
     replay: bool = Form(False, description="cached/fixture results only, never a paid call"),
     profile: str | None = Form(None, description="JSON calibration profile (app/calibration.py clean_profile)"),
     sensor: str | None = Form(None, description="JSON averaged DeviceOrientation {beta, gamma, angle, n}"),
+    x_demo_token: str | None = Header(None, description="judge token, needed for live checks when BL_DEMO_TOKEN is set"),
 ) -> dict:
     """Upload a clip -> normalise, blur faces locally, triage, SAM, geometry, explanation (see app/analyze.py)."""
+    if not replay:
+        require_live_token(x_demo_token)
     up_dir = _analyze.WORK_DIR / "uploads"
     up_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(video.filename or "").suffix.lower()[:8] or ".mp4"
@@ -148,8 +165,11 @@ async def api_calibrate(
     profile: str | None = Form(None),
     sensor: str | None = Form(None),
     replay: bool = Form(False),
+    x_demo_token: str | None = Header(None),
 ) -> dict:
     """One-time calibration: solve camera height and tilt from a reference of known size (app/calibration.py)."""
+    if not replay:
+        require_live_token(x_demo_token)
     up_dir = _analyze.WORK_DIR / "uploads"
     up_dir.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(suffix=Path(video.filename or "").suffix.lower()[:8] or ".mp4", dir=up_dir)
