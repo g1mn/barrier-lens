@@ -292,3 +292,32 @@ def test_profile_routes(env, scene, clip_src):
     with clip_src.open("rb") as f:
         bad = c.post("/api/calibrate", files={"video": ("ref.mp4", f, "video/mp4")}, data={"ref_kind": "coin"})
     assert bad.status_code == 422
+
+
+def test_unknown_cause_comes_from_geometry():
+    m = {"verdict": "unknown", "gap_cm": 33.5, "band_cm": [15.8, 125.9], "detail": {"dominant_error": "tilt"}}
+    c = analyze.unknown_cause(m)
+    assert "tilt" in c["reason"] and "16" in c["reason"] and "126" in c["reason"]
+    assert "motion sensor" in c["next_step"] and "tilt" in c["keywords"]
+    text = analyze.cause_text(c)
+    assert c["reason"] in text and c["next_step"] in text
+    assert analyze.unknown_cause({**m, "verdict": "tight"}) is None
+    assert analyze.unknown_cause({"verdict": "unknown", "gap_cm": None, "band_cm": None, "detail": {}}) is None
+    assert analyze.unknown_cause({**m, "detail": {"dominant_error": "reference corners"}}) is None
+
+
+def test_unknown_explanation_must_name_the_measured_cause(env, scene, clip_src, monkeypatch):
+    """A model sentence that blames something geometry did not measure ("unclear view") is replaced."""
+    _write_sam_fixture(env / "fixtures", "bollard", scene["barrier_masks"], scene["frame_size"])
+
+    async def wrong_cause(measurement, replay):
+        return {"text": "We can't tell because the view was too unclear to measure.", "model": "muse-spark-1.3",
+                "warnings": []}
+    monkeypatch.setattr(analyze, "_explain", wrong_cause)
+    r = asyncio.run(analyze.analyze(clip_src, None, None, replay=True, concepts_hint=["bollard"]))
+    cause = analyze.unknown_cause({"verdict": r["verdict"], "band_cm": r["band_cm"], "detail": r["measurement_detail"]})
+    if cause is None:
+        pytest.skip(f"this synthetic scene did not end as a wide-band unknown ({r['verdict']})")
+    assert "unclear" not in r["explanation"]
+    assert any(w in r["explanation"].lower() for w in cause["keywords"])
+    assert r["models"]["explain"] == "template"

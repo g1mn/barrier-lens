@@ -322,6 +322,39 @@ def _unknown(why: str) -> dict:
     return {"gap_cm": None, "band_cm": None, "verdict": "unknown", "why": why, "detail": {}}
 
 
+# Why an "unknown" was unknown, in plain words, from geometry's own numbers (never from the model). The explanation
+# must name this cause; a model sentence that blames something else ("the view was unclear") is replaced.
+# (reason, next step, words the explanation must contain one of)
+UNKNOWN_CAUSES = {
+    "tilt": ("the phone's tilt was not recorded, so the gap could be anywhere from {lo} to {hi} cm",
+             "Allow the motion sensor when you film so the tilt is recorded, or calibrate once in your profile.",
+             ("tilt", "angle", "기울")),
+    "height": ("we do not know how high you held the phone, so the gap could be anywhere from {lo} to {hi} cm",
+               "Set your armrest height in your profile, or calibrate once.", ("high", "height", "높이")),
+    "field of view": ("we do not know how wide your phone camera sees, so the gap could be anywhere from {lo} to "
+                      "{hi} cm", "Calibrate once in your profile so we know your camera.", ("camera", "화각", "카메라")),
+    "roll": ("the phone was leaning to one side, so the gap could be anywhere from {lo} to {hi} cm",
+             "Hold the phone level when you film.", ("level", "side", "lean", "수평", "기울")),
+    "mask edges": ("the edges of the barriers were hard to pin down, so the gap could be anywhere from {lo} to {hi} cm",
+                   "Film a little closer and hold the phone steady.", ("edge", "가장자리")),
+}
+
+
+def unknown_cause(m: dict) -> dict | None:
+    """{"reason", "next_step", "keywords"} for a band too wide to decide, or None (not unknown, or no gap at all)."""
+    band, dom = m.get("band_cm"), (m.get("detail") or {}).get("dominant_error")
+    if m.get("verdict") != "unknown" or not band or dom not in UNKNOWN_CAUSES:
+        return None
+    reason, step, words = UNKNOWN_CAUSES[dom]
+    return {"reason": reason.format(lo=round(band[0]), hi=round(band[1])), "next_step": step, "keywords": words}
+
+
+def cause_text(cause: dict) -> str:
+    """Deterministic explanation for an unknown with a known cause."""
+    return (f"We cannot say yet whether your wheelchair fits: {cause['reason']}. {cause['next_step']} "
+            "Four A4 sheets taped flat on the ground near the gap also work.")
+
+
 # replaces the fixed fallback text for "unknown", which asked for a reference as if it were required
 UNKNOWN_EXPLANATION = ("We could not measure this gap, so we cannot say whether your wheelchair fits. Film again with "
                        "both sides of the gap and the ground in front of it in view. A reference on the ground (four "
@@ -448,8 +481,16 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
     t = time.monotonic()
     ex_in = {k: m.get(k) for k in ("gap_cm", "band_cm", "verdict", "why")}
     ex_in.update({"chair_width_cm": chair_cm, "barrier": ", ".join(barriers) or None})
+    cause = unknown_cause(m)
+    if cause:
+        ex_in.update({"reason": cause["reason"], "next_step": cause["next_step"]})
     ex = await _explain(ex_in, replay)
-    if ex.get("model") == "template" and m.get("verdict") == "unknown":
+    if cause and (ex.get("model") == "template"
+                  or not any(w in (ex.get("text") or "").lower() for w in cause["keywords"])):
+        # the model's sentence does not name the measured cause (or there was no model): say it ourselves
+        ex = {**ex, "text": cause_text(cause), "model": "template",
+              "warnings": (ex.get("warnings") or []) + ["explanation did not name the measured cause; replaced"]}
+    elif ex.get("model") == "template" and m.get("verdict") == "unknown":
         ex = {**ex, "text": UNKNOWN_EXPLANATION}
     models["explain"] = ex.get("model")
     timings["explain_s"] = round(time.monotonic() - t, 2)
