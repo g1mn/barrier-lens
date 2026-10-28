@@ -46,9 +46,10 @@ SEOUL_BASE = "http://openapi.seoul.go.kr:8088"
 VWORLD_URL = "https://api.vworld.kr/req/address"
 PAGE = 1000            # Seoul Open API maximum rows per call
 KEEP_GU = {"서초구", "강남구"}
-# Dongs that touch a 1 km circle around Yangjae Station. Only these get geocoded.
-TARGET_DONGS = ("서울특별시 서초구 양재동", "서울특별시 강남구 도곡동", "서울특별시 서초구 서초동",
-                "서울특별시 강남구 개포동")
+# Only these get geocoded. OA-23057 addresses use the legal dong (법정동) 양재동, which is the area of
+# the two administrative dongs 양재1동 and 양재2동 around Yangjae Station. Neighbouring dongs inside
+# 1 km (도곡동, 서초동, 개포동) are deliberately left out to keep VWorld calls low.
+TARGET_DONGS = ("서울특별시 서초구 양재동",)
 BUILD_RADIUS_M = 1000
 VWORLD_GAP_S = 1.5
 
@@ -198,6 +199,9 @@ def cmd_geocode(args: argparse.Namespace) -> None:
     calls, fails_in_row = 0, 0
     with httpx.Client() as client, GEOCODE_CACHE.open("a") as f:
         for addr in todo[: args.max]:
+            if calls + 2 > args.max_calls:
+                log(f"  stopping at the call budget ({calls} calls, --max-calls {args.max_calls})")
+                break
             result = None
             for kind in ("parcel", "road"):
                 try:
@@ -320,6 +324,22 @@ def cmd_exits(_args: argparse.Namespace) -> None:
 
 # ---------------------------------------------------------------- build the demo cache
 
+# TYPE is a category picked from a district form, but some rows carry the reporter's own free text.
+# Free text is folded into one bucket so complaint wording never reaches the published cache.
+KNOWN_KINDS = {
+    "보도와 차도가 구분된 도로의 차도", "상기 사항 외 보도", "버스정류장, 택시 승강장", "횡단보도, 산책로 등",
+    "횡단보도 주변(3m)", "횡단보도 주변(3m 이내)", "자전거 도로", "자전거도로", "보호구역(어린이·노인·장애인)",
+    "보도 중앙", "버스정류소 및 택시승강장 주변(5m 이내)", "버스정류장", "그 외 지역", "지하철역 진출입로 및 주변",
+    "지하철역 전면(5m이내)", "지하철역", "점자블록 또는 교통약자 엘리베이터", "점자블록, 엘리베이터 입구",
+    "점자보도", "교통섬 내부", "기타", "오신고",
+}
+FREE_TEXT_KIND = "기타(신고자 자유 기재)"
+
+
+def kind_of(t: str) -> str:
+    t = (t or "").strip()
+    return t if t in KNOWN_KINDS else FREE_TEXT_KIND
+
 def cmd_build(_args: argparse.Namespace) -> None:
     station = json.loads(STATION_OUT.read_text())
     c = station["centre"]
@@ -343,17 +363,20 @@ def cmd_build(_args: argparse.Namespace) -> None:
             continue
         dates = sorted(r["DCLR_DT"] for r in rs)
         points.append({
-            "addr": addr, "lat": g["lat"], "lon": g["lon"], "geocode": g["type"],
+            "address": addr, "lat": g["lat"], "lon": g["lon"], "geocode": g["type"],
             "count": len(rs), "first": dates[0], "last": dates[-1],
             "by_year": dict(sorted(collections.Counter(x[:4] for x in dates).items())),
-            "types": dict(collections.Counter(r["TYPE"] for r in rs).most_common()),
+            "kinds": dict(collections.Counter(kind_of(r["TYPE"]) for r in rs).most_common()),
             "dist_m": round(d),
         })
     points.sort(key=lambda p: (-p["count"], p["dist_m"]))
     all_dates = sorted(d for p in points for d in (p["first"], p["last"]))
     not_found = sorted({a for a in (r["ADDR"].strip() for r in rows) if cache.get(a, {}).get("status") == "NOT_FOUND"})
+    distinct = {r["ADDR"].strip() for r in rows}
+    geocoded_ok = {a for a in distinct if cache.get(a, {}).get("status") == "OK"}
     out = {
-        "what": "E-scooter towing records (OA-23057) within 1 km of Yangjae Station, grouped by lot address",
+        "what": "E-scooter towing records (OA-23057) in 양재동 (양재1동 + 양재2동) within 1 km of Yangjae Station,"
+                " grouped by lot address",
         "built_at": now_iso(),
         "centre": c,
         "radius_m": BUILD_RADIUS_M,
@@ -363,6 +386,11 @@ def cmd_build(_args: argparse.Namespace) -> None:
         "coverage": {
             "dongs_geocoded": list(TARGET_DONGS),
             "rows_in_dongs": len(rows),
+            "rows_in_dongs_date_range": ([min(r["DCLR_DT"] for r in rows), max(r["DCLR_DT"] for r in rows)]
+                                         if rows else None),
+            "distinct_addresses": len(distinct),
+            "addresses_geocoded": len(geocoded_ok),
+            "rows_geocoded": sum(1 for r in rows if r["ADDR"].strip() in geocoded_ok),
             "rows_without_geocode_yet": missing,
             "addresses_not_found": len(not_found),
         },
@@ -370,6 +398,9 @@ def cmd_build(_args: argparse.Namespace) -> None:
             "Coordinates are VWorld parcel (lot) centroids, not the spot where the scooter stood: expect tens of metres of error.",
             "Records are past towing reports (DCLR_DT = report date), not current obstacles.",
             "Districts changed how they log towing over the years; compare years inside one district only.",
+            "Only 양재동 (the legal dong of 양재1동 and 양재2동) is geocoded. Parts of the 1 km circle in 도곡동,"
+            " 서초동 and 개포동 have towing too but are not in this file.",
+            "Some report kinds are the reporter's own free text; those are counted as 기타(신고자 자유 기재).",
         ],
         "source": "Seoul Open Data Plaza OA-23057 (aiTbAutoKickboard), KOGL Type 1; geocoded with VWorld",
         "data": points,
@@ -402,7 +433,9 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("towing")
     g = sub.add_parser("geocode")
-    g.add_argument("--max", type=int, default=800, help="max addresses this run (VWorld daily budget)")
+    g.add_argument("--max", type=int, default=600, help="max addresses this run")
+    g.add_argument("--max-calls", type=int, default=700,
+                   help="max VWorld requests this run (an address can take 2: parcel, then road)")
     sub.add_parser("station")
     sub.add_parser("exits")
     sub.add_parser("build")

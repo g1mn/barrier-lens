@@ -259,3 +259,11 @@ input[type="file"]::file-selector-button {
   .sheet-head { padding-top: 14px; }
   .crosshair { left: calc(50% + 208px); }
 }
+
+/* analyze-api: portrait clips stay on screen; the overlay canvas tracks the video box */
+.stage:not(.no-video) { width: fit-content; max-width: 100%; margin-inline: auto; }
+.stage:not(.no-video) video { width: auto; max-width: 100%; max-height: 56vh; }
+.stage.no-video canvas { max-height: 56vh; width: auto; max-width: 100%; margin-inline: auto; }
+.verdict:focus { outline: none; }
+.verdict:focus-visible { outline: 3px solid var(--v); outline-offset: 3px; }
+[hidden] { display: none !important; }  /* .btn and friends set display, which would otherwise beat the hidden attribute */

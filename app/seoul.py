@@ -39,6 +39,16 @@ TYPE_EN = {
     "점자블록, 엘리베이터 입구": "On tactile paving or at an elevator entrance",
     "교통섬 내부": "Inside a traffic island",
     "오신고": "False report",
+    "버스정류장, 택시 승강장": "Bus stop or taxi stand",
+    "버스정류장": "Bus stop",
+    "횡단보도, 산책로 등": "Crosswalk, walking path, etc.",
+    "자전거도로": "Bike lane",
+    "보도 중앙": "Middle of the sidewalk",
+    "지하철역 진출입로 및 주변": "Subway station entrance or its surroundings",
+    "지하철역": "Subway station",
+    "점자보도": "Tactile paving",
+    "기타": "Other",
+    "기타(신고자 자유 기재)": "Other (reporter's own words, not published)",
 }
 
 
@@ -63,23 +73,40 @@ def towing_meta() -> dict:
     return {k: v for k, v in t.items() if k != "data"}
 
 
-def towing_near(lat: float, lon: float, radius_m: int) -> list[dict]:
+def towing_near(lat: float, lon: float, radius_m: float) -> list[dict]:
     """Towing records grouped by lot address within radius_m of (lat, lon), nearest first.
 
-    Each item: addr, lat, lon, count, first, last (report dates), by_year, types, types_en, dist_m.
-    Only the area cached by scripts/fetch_seoul.py (1 km around Yangjae Station) has data;
-    a query outside it returns an empty list, which means "not cached", not "no towing".
+    Each item: address, lat, lon, count, first, last (report dates YYYY-MM-DD), kinds ({kind: n},
+    Korean form categories), plus by_year, kinds_en, dist_m, and addr / types_en (aliases kept for
+    static/app.js). Reads data/seoul/towing-yangjae.json only; never calls VWorld or Seoul Open Data.
+    Only 양재동 within 1 km of Yangjae Station is cached: an empty list outside it means "not cached",
+    not "no towing".
     """
     out = []
     for p in _towing().get("data", []):
         d = haversine_m(lat, lon, p["lat"], p["lon"])
-        if d <= radius_m:
-            item = {k: v for k, v in p.items() if k != "dist_m"}
-            item["dist_m"] = round(d)
-            item["types_en"] = {TYPE_EN.get(t, t): n for t, n in p.get("types", {}).items()}
-            out.append(item)
+        if d > radius_m:
+            continue
+        kinds = p.get("kinds", {})
+        kinds_en = {TYPE_EN.get(t, t): n for t, n in kinds.items()}
+        out.append({
+            "address": p["address"], "lat": p["lat"], "lon": p["lon"], "count": p["count"],
+            "first": p["first"], "last": p["last"], "kinds": kinds,
+            "by_year": p.get("by_year", {}), "kinds_en": kinds_en, "dist_m": round(d),
+            "addr": p["address"], "types_en": kinds_en,
+        })
     out.sort(key=lambda p: (p["dist_m"], -p["count"]))
     return out
+
+
+def exit_position(ref: str) -> tuple[float, float] | None:
+    """(lat, lon) of a Yangjae Station exit by its number, from the cached OpenStreetMap nodes."""
+    if not EXITS_FILE.exists():
+        return None
+    for n in json.loads(EXITS_FILE.read_text()).get("nodes", []):
+        if n.get("railway") == "subway_entrance" and n.get("ref") == str(ref):
+            return n["lat"], n["lon"]
+    return None
 
 
 # ---------------------------------------------------------------- station accessibility

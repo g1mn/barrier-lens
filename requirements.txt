@@ -5,3 +5,4 @@ numpy>=2.0
 meta-sam-parser>=0.1.0
 pytest>=8
 opencv-python-headless>=4.10
+python-multipart>=0.0.20

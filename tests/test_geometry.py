@@ -97,6 +97,95 @@ def test_verdict_rule():
     assert geometry.verdict_for(65, 85) == "tight"
 
 
+# ---------------------------------------------------------------- tactile strip (width known, length unknown)
+
+STRIP_DISTS = [2.0, 3.0, 4.0]
+
+
+@pytest.mark.parametrize("dist", STRIP_DISTS)
+@pytest.mark.parametrize("gap", [70, 90, 120])
+def test_strip_true_gap_inside_band(gap, dist):
+    s = render_scene(gap, dist, "strip")  # camera yawed 4 deg and 5 cm off-centre: not square to the walkway
+    r = geometry.measure_gap(ground_ref_for(s), s["barrier_masks"], s["frame_size"])
+    ROWS.append(("strip", dist, gap, r))
+    lo, hi = r["band_cm"]
+    assert lo <= gap <= hi, (gap, r["gap_cm"], r["band_cm"])
+    assert abs(r["gap_cm"] - gap) < 1.0
+    assert r["verdict"] == geometry.verdict_for(lo, hi)
+    assert "level camera" in r["why"] and "not square" in r["why"]
+    assert r["detail"]["scale_cm_per_px"] and r["detail"]["measure"] == "across-walkway corridor"
+
+
+def test_strip_square_camera_row_estimate_agrees():
+    s = render_scene(90, 3.0, "strip", yaw_deg=0.0, cam_x=0.0)
+    r = geometry.measure_gap(ground_ref_for(s), s["barrier_masks"], s["frame_size"])
+    assert r["detail"]["camera_square"] and "roughly square" in r["why"]
+    assert abs(r["detail"]["row_gap_cm"] - 90) < 1.0 and r["band_cm"][0] <= 90 <= r["band_cm"][1]
+
+
+@pytest.mark.parametrize("roll", [-2.0, 1.0])
+def test_strip_small_roll_still_inside_band(roll):
+    s = render_scene(90, 3.0, "strip", roll_deg=roll)
+    r = geometry.measure_gap(ground_ref_for(s), s["barrier_masks"], s["frame_size"])
+    assert r["band_cm"][0] <= 90 <= r["band_cm"][1]
+
+
+def test_strip_extrapolation_flagged_and_band_wider():
+    full = render_scene(90, 3.0, "strip")
+    short = render_scene(90, 3.0, "strip", strip_far_m=2.0)  # strip ends 1 m before the barriers
+    rf = geometry.measure_gap(ground_ref_for(full), full["barrier_masks"], full["frame_size"])
+    rs = geometry.measure_gap(ground_ref_for(short), short["barrier_masks"], short["frame_size"])
+    assert "EXTRAPOLATED" not in rf["why"] and "EXTRAPOLATED" in rs["why"]
+    assert rs["band_cm"][0] <= 90 <= rs["band_cm"][1]
+    assert rs["band_cm"][1] - rs["band_cm"][0] > rf["band_cm"][1] - rf["band_cm"][0]
+
+
+def test_strip_edges_close_to_truth():
+    s = render_scene(90, 3.0, "strip", strip_x_m=0.0)
+    e = geometry.strip_edges(s["ref_mask"])
+    assert e is not None and e["rows_used"] > 100
+    # strip width in px from the fit vs the projected truth at the bottom used row
+    from synth_scene import camera, project
+    import math
+    cam = camera(pitch_deg=s["pitch_deg"])
+    y = e["y_bot"]
+    # ground Y whose projection lands on row y, along the strip's centre line (bisection)
+    lo_y, hi_y = 0.3, 10.0
+    for _ in range(60):
+        mid = (lo_y + hi_y) / 2
+        if project(cam, np.array([[0.0, mid, 0.0]]))[0, 1] > y:
+            lo_y = mid
+        else:
+            hi_y = mid
+    pl, pr = project(cam, np.array([[-0.15, mid, 0.0], [0.15, mid, 0.0]]))
+    fit_w = (e["right"][0] - e["left"][0]) * y + (e["right"][1] - e["left"][1])
+    assert abs(fit_w - math.hypot(*(pr - pl))) < 1.0
+
+
+def test_strip_unknown_cases():
+    s = render_scene(90, 3.0, "strip")
+    empty = {"kind": "tactile_strip", "width_cm": 30, "mask": np.zeros_like(s["ref_mask"])}
+    r = geometry.measure_gap(empty, s["barrier_masks"], s["frame_size"])
+    assert r["verdict"] == "unknown" and "too short" in r["why"]
+    r = geometry.measure_gap({"kind": "tactile_strip"}, s["barrier_masks"], s["frame_size"])
+    assert r["verdict"] == "unknown" and "mask" in r["why"]
+    r = geometry.measure_gap(ground_ref_for(s), s["barrier_masks"][:1], s["frame_size"])
+    assert r["verdict"] == "unknown"
+    # a square block is not a strip: its edges do not converge enough to place a horizon, or it is too short
+    b = render_scene(90, 3.0, "block")
+    r = geometry.measure_gap({"kind": "tactile_strip", "mask": b["ref_mask"]}, b["barrier_masks"], b["frame_size"])
+    assert r["verdict"] == "unknown" or r["band_cm"][1] - r["band_cm"][0] > 10
+
+
+def test_strip_sam_object_inputs():
+    from app.sam import encode_rle
+    s = render_scene(70, 3.0, "strip")
+    objs = [{"id": k, "score": 1.0, "mask_rle": encode_rle(m)} for k, m in enumerate(s["barrier_masks"])]
+    ref = {"kind": "tactile_strip", "width_cm": 30, "mask": {"mask_rle": encode_rle(s["ref_mask"])}}
+    r = geometry.measure_gap(ref, objs, s["frame_size"])
+    assert r["band_cm"][0] <= 70 <= r["band_cm"][1]
+
+
 def teardown_module(module):
     if not ROWS:
         return

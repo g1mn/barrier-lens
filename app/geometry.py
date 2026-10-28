@@ -19,6 +19,9 @@ Reference kinds (ground_ref["kind"]):
     "a4x4"           four A4 sheets in a 2 x 2 square, portrait: 42.0 across x 59.4 along.
     "rect"           any measured rectangle; "size_cm": [across, along] is required.
 The image side comes from "corners" (4 points) or "mask" (bool array or a SAM object with mask_rle/polygon).
+    "tactile_strip"  a straight strip of known width ("width_cm", default 30) and unknown length, running along the
+                     walkway into the distance; "mask" is required. See measure_gap_strip: it measures the clear
+                     corridor ACROSS the walkway only (no along-walkway scale exists without a known length).
 
 Gap: barrier ground contact = the lowest mask pixel in each column (its bottom edge), mapped to the ground. The
 reported gap is the widest passage among neighbouring barriers (sorted left to right by ground X), each passage
@@ -38,6 +41,8 @@ side; 70 + 2 x 5 = 80 cm, close to the 32-inch (81.3 cm) minimum clear width at 
 use (sections 404.2.3 and 403.5.1, from memory -- not checked against the text in this repo). It is a parameter.
 """
 from __future__ import annotations
+
+import math
 
 import cv2
 import numpy as np
@@ -258,6 +263,10 @@ def measure_gap(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
     W, Hpx = int(frame_size[0]), int(frame_size[1])
     if not ground_ref:
         return _unknown("no ground reference: a gap in centimetres needs a rectangle of known size on the ground")
+    if ground_ref.get("kind") == "tactile_strip":
+        return measure_gap_strip(ground_ref, barrier_masks, frame_size, wheelchair_cm=wheelchair_cm,
+                                 clearance_cm=clearance_cm, walkway_edge=walkway_edge, contact_px=contact_px,
+                                 n_draws=n_draws, seed=seed)
 
     # reference corners
     try:
@@ -367,3 +376,291 @@ def measure_gap(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
                    "dropped_contacts": dropped, "wheelchair_cm": wheelchair_cm, "clearance_cm": clearance_cm},
     }
 
+
+
+# ---------------------------------------------------------------- tactile strip of known width (second reference mode)
+#
+# A straight strip of width w on the ground, running along the walkway (direction Y), seen in perspective: its two
+# long edges are image lines that meet at the vanishing point V of the walkway direction. Every ground line parallel
+# to the strip also passes through V, so the across-walkway coordinate X of a ground point depends only on WHICH line
+# through V it lies on. Three lines of that pencil are known -- left edge (X = 0), right edge (X = w) and the horizon
+# (X = infinity) -- which fixes X as a projective coordinate on the pencil:
+#     X(p) = k * (L0 . p) / (Lh . p),   k chosen so that X = w on the right edge.
+# The horizon is the one assumption: the camera is held level (no roll), so the horizon is the image row through V.
+# Yaw (camera not square to the walkway) needs no assumption: X is measured across the walkway on the ground, not
+# along an image row. The along-walkway scale is unknown (the strip's length is unknown), so the gap reported here is
+# the clear corridor width across the walkway: min X of the right barrier's contact minus max X of the left one.
+# For barriers side by side that is the narrowest point; for staggered barriers it is the straight-through corridor
+# (a lower bound on the diagonal distance), which is what a wheelchair rolling along the walkway needs.
+#
+# s(y) = w / (x_right(y) - x_left(y)) is the local cm-per-pixel along image row y; it is reported in detail and used
+# for a cross-check ("row_gap_cm") that is valid only when the camera is square to the walkway.
+
+STRIP_WIDTH_CM = 30.0
+MIN_STRIP_ROWS = 12          # usable mask rows needed to fit the two edges
+MIN_STRIP_WIDTH_PX = 5.0     # strip width at the barriers' contact rows
+STRIP_EXTRAP_REL = 0.05      # extra relative sigma per strip-span of extrapolation (heuristic: curvature, mask ends)
+
+
+def _largest_component(m: np.ndarray) -> np.ndarray:
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), connectivity=8)
+    if n <= 2:
+        return m
+    k = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    return lab == k
+
+
+def _robust_line(y: np.ndarray, x: np.ndarray, iters: int = 6) -> tuple[np.ndarray, np.ndarray]:
+    """Fit x = a*y + b, dropping residuals beyond max(3 sigma_MAD, 1 px) each round. Returns (a, b), inlier mask."""
+    keep = np.ones(len(y), bool)
+    for _ in range(iters):
+        a, b = np.polyfit(y[keep], x[keep], 1)
+        r = x - (a * y + b)
+        sig = 1.4826 * np.median(np.abs(r[keep] - np.median(r[keep])))
+        new = np.abs(r) <= max(3.0 * sig, 1.0)
+        if new.sum() < 3 or np.array_equal(new, keep):
+            break
+        keep = new
+    a, b = np.polyfit(y[keep], x[keep], 1)
+    return np.array([a, b]), keep
+
+
+def strip_edges(mask, frame_size=None) -> dict | None:
+    """Bool mask (or SAM object) of a strip running away from the camera -> its two edge lines x = a*y + b.
+
+    Per row, the leftmost pixel j gives the left edge at x = j and the rightmost pixel j gives the right edge at
+    x = j + 1 (pixel-centre rasterisation: those are the unbiased edge positions). Rows clipped by the frame's side
+    are dropped, as are the 5% of rows at each end of the strip (its end caps cut rows short); each edge is then fit
+    with a robust line, so rows where a barrier hides part of the strip fall out as outliers.
+    Returns None when there are fewer than MIN_STRIP_ROWS usable rows.
+    """
+    m = _as_mask(mask, frame_size) if frame_size is not None else np.asarray(mask, dtype=bool)
+    if m.sum() == 0:
+        return None
+    m = _largest_component(m)
+    W = m.shape[1]
+    rows = np.flatnonzero(m.any(axis=1))
+    left = np.argmax(m[rows], axis=1).astype(float)
+    right = (W - 1 - np.argmax(m[rows, ::-1], axis=1)).astype(float) + 1.0
+    ok = (left > 0) & (right < W)
+    rows, left, right = rows[ok], left[ok], right[ok]
+    if len(rows) < MIN_STRIP_ROWS:
+        return None
+    trim = max(2, int(round(0.05 * (rows[-1] - rows[0] + 1))))
+    inner = (rows >= rows[0] + trim) & (rows <= rows[-1] - trim)
+    rows, left, right = rows[inner], left[inner], right[inner]
+    if len(rows) < MIN_STRIP_ROWS:
+        return None
+    y = rows + 0.5
+    lf, lk = _robust_line(y, left)
+    rf, rk = _robust_line(y, right)
+    used = lk & rk
+    if used.sum() < MIN_STRIP_ROWS:
+        return None
+    return {"left": lf, "right": rf, "y_top": float(y[used].min()), "y_bot": float(y[used].max()),
+            "rows_used": int(used.sum()), "rows_seen": int(len(rows))}
+
+
+def _line_h(ab: np.ndarray) -> np.ndarray:
+    """x = a*y + b as a homogeneous line (1, -a, -b)."""
+    return np.array([1.0, -ab[0], -ab[1]])
+
+
+class _StripRuler:
+    """Across-walkway coordinate X (cm) of image points, from the two edge lines and a level-camera horizon."""
+
+    def __init__(self, left_ab, right_ab, width_cm, y_ref, roll_rad=0.0):
+        self.L0, self.L1 = _line_h(left_ab), _line_h(right_ab)
+        self.left_ab, self.right_ab = np.asarray(left_ab, float), np.asarray(right_ab, float)
+        self.V = np.cross(self.L0, self.L1)  # vanishing point of the walkway direction (homogeneous)
+        self.Lh = np.cross(self.V, np.array([math.cos(roll_rad), math.sin(roll_rad), 0.0]))
+        q = np.array([right_ab[0] * y_ref + right_ab[1], y_ref, 1.0])  # a point on the right edge
+        self.ground_sign = np.sign(self.Lh @ q)
+        self.k = width_cm * (self.Lh @ q) / (self.L0 @ q)
+        self.width_cm = width_cm
+
+    def X(self, pts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        hom = np.column_stack([pts, np.ones(len(pts))])
+        d = hom @ self.Lh
+        ok = np.sign(d) == self.ground_sign
+        ok &= np.abs(d) > 1e-9
+        out = np.full(len(pts), np.nan)
+        out[ok] = self.k * (hom[ok] @ self.L0) / d[ok]
+        return out, ok
+
+    def width_px(self, y):
+        y = np.asarray(y, float)
+        return (self.right_ab[0] - self.left_ab[0]) * y + (self.right_ab[1] - self.left_ab[1])
+
+    def vanishing_point(self) -> list | None:
+        return None if abs(self.V[2]) < 1e-12 else (self.V[:2] / self.V[2]).tolist()
+
+
+def _strip_passages(xsets: list[np.ndarray], edge_x: np.ndarray | None, labels: list[str]):
+    """Neighbour corridors across the walkway, left to right: [(label, cm)] (negative = overlapping, i.e. none)."""
+    order = np.argsort([np.median(x) for x in xsets])
+    out = [(f"{labels[i]}|{labels[j]}", float(xsets[j].min() - xsets[i].max())) for i, j in zip(order[:-1], order[1:])]
+    if edge_x is not None and len(xsets):
+        if np.median(edge_x) < np.median(xsets[order[0]]):
+            k = order[0]
+            out.append((f"edge|{labels[k]}", float(xsets[k].min() - edge_x.max())))
+        else:
+            k = order[-1]
+            out.append((f"{labels[k]}|edge", float(edge_x.min() - xsets[k].max())))
+    return out
+
+
+def measure_gap_strip(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
+                      wheelchair_cm: float = DEFAULT_WHEELCHAIR_CM, clearance_cm: float = DEFAULT_CLEARANCE_CM,
+                      walkway_edge=None, contact_px: float = 1.0, edge_px: float = 1.0, roll_deg: float = 1.0,
+                      n_draws: int = 400, seed: int = 0) -> dict:
+    """Clear corridor across the walkway, from a tactile strip of known width (see the section comment above).
+
+    Monte Carlo per draw: each edge line is refit through its two end anchors (top and bottom used rows), each moved
+    by N(0, edge_px^2) across; the horizon is tilted by N(0, roll_deg^2) about V (the level-camera assumption is not
+    exact); each barrier's contact set shifts by N(0, contact_px^2) per axis. Contacts outside the strip's row range
+    are extrapolated with the line model -- that is flagged in "why", and the draw gets an extra relative error of
+    STRIP_EXTRAP_REL per strip-span of extrapolation on top of the line perturbation (which already grows with it).
+    """
+    W, Hpx = int(frame_size[0]), int(frame_size[1])
+    width_cm = float(ground_ref.get("width_cm", STRIP_WIDTH_CM))
+    if ground_ref.get("mask") is None:
+        return _unknown("tactile_strip reference needs a mask of the strip")
+    edges = strip_edges(_as_mask(ground_ref["mask"], (W, Hpx)))
+    if edges is None:
+        return _unknown(f"strip mask too short: fewer than {MIN_STRIP_ROWS} usable rows to fit its two edges -- "
+                        "the strip must run into the distance and stay inside the frame's sides")
+    y_top, y_bot = edges["y_top"], edges["y_bot"]
+    span = y_bot - y_top
+    ruler = _StripRuler(edges["left"], edges["right"], width_cm, (y_top + y_bot) / 2)
+    vp = ruler.vanishing_point()
+    if vp is None or vp[1] >= y_top or ruler.width_px(y_bot) <= ruler.width_px(y_top):
+        return _unknown("strip edges do not converge away from the camera: cannot place the horizon "
+                        "(strip not running along the walkway, or the mask is not a strip)",
+                        strip_edges={"left": edges["left"].tolist(), "right": edges["right"].tolist()})
+
+    masks = [_as_mask(m, (W, Hpx)) for m in barrier_masks]
+    contacts, labels = [], []
+    for k, m in enumerate(masks):
+        c = contact_points(m)
+        if len(c):
+            contacts.append(c)
+            labels.append(f"b{k}")
+    edge_img = None if walkway_edge is None else np.asarray(walkway_edge, dtype=float).reshape(2, 2)
+    if len(contacts) + (edge_img is not None) < 2:
+        return _unknown("need two barriers with visible ground contact, or one barrier and a walkway edge",
+                        n_barriers=len(contacts))
+    edge_pts = None if edge_img is None else edge_img[0] + np.linspace(0, 1, 21)[:, None] * (edge_img[1] - edge_img[0])
+
+    dropped = 0
+    for k, s in enumerate(contacts):
+        _, ok = ruler.X(s)
+        dropped += int((~ok).sum())
+        contacts[k] = s[ok]
+    if any(len(s) == 0 for s in contacts) or (edge_pts is not None and not ruler.X(edge_pts)[1].all()):
+        return _unknown("barrier contact points lie above the strip's horizon: the strip is not on the same ground")
+
+    def run(r: _StripRuler, sets, epts):
+        xs = []
+        for s in sets:
+            x, ok = r.X(s)
+            if ok.sum() < max(1, len(s) // 2):
+                return None
+            xs.append(x[ok])
+        ex = None
+        if epts is not None:
+            ex, ok = r.X(epts)
+            if not ok.all():
+                return None
+        return _strip_passages(xs, ex, labels)
+
+    nominal = run(ruler, contacts, edge_pts)
+    best = int(np.argmax([d for _, d in nominal]))
+    gap = nominal[best][1]
+
+    # the pair (or barrier + edge) that makes the chosen corridor, and the image rows where it is pinched
+    pair = nominal[best][0].split("|")
+    pinch = []
+    for side, lab in zip(("max", "min"), pair):
+        if lab == "edge":
+            continue
+        s = contacts[labels.index(lab)]
+        x = ruler.X(s)[0]
+        pinch.append(s[int(np.nanargmax(x) if side == "max" else np.nanargmin(x))])
+    pinch = np.array(pinch)
+    rows_all = np.concatenate([s[:, 1] for s in contacts])
+    extrap = float(max(0.0, y_top - rows_all.min(), rows_all.max() - y_bot))
+    extrap_pinch = float(max(0.0, y_top - pinch[:, 1].min(), pinch[:, 1].max() - y_bot))
+    if ruler.width_px(pinch[:, 1]).min() < MIN_STRIP_WIDTH_PX:
+        return _unknown(f"strip only {ruler.width_px(pinch[:, 1]).min():.1f} px wide at the barriers' contact rows "
+                        f"(need >= {MIN_STRIP_WIDTH_PX:.0f} px) -- film closer")
+
+    rng = np.random.default_rng(seed)
+    anchors = np.array([y_top, y_bot])
+    xl = edges["left"][0] * anchors + edges["left"][1]
+    xr = edges["right"][0] * anchors + edges["right"][1]
+    ext_sig = STRIP_EXTRAP_REL * extrap_pinch / max(span, 1.0)
+    draws, bad = [], 0
+    for _ in range(n_draws):
+        lj = np.polyfit(anchors, xl + rng.normal(0.0, edge_px, 2), 1)
+        rj = np.polyfit(anchors, xr + rng.normal(0.0, edge_px, 2), 1)
+        rr = _StripRuler(lj, rj, width_cm, (y_top + y_bot) / 2, math.radians(rng.normal(0.0, roll_deg)))
+        sj = [s + rng.normal(0.0, contact_px, 2) for s in contacts]
+        ej = None if edge_pts is None else edge_pts + rng.normal(0.0, contact_px, 2)
+        r = run(rr, sj, ej)
+        if r is None or len(r) != len(nominal):
+            bad += 1
+            continue
+        draws.append(r[best][1] * (1.0 + rng.normal(0.0, ext_sig)) if ext_sig > 0 else r[best][1])
+    if bad > MAX_BAD_DRAW_FRACTION * n_draws:
+        return _unknown(f"strip ruler ill-conditioned: {bad} of {n_draws} perturbed draws put contacts behind the "
+                        "horizon -- film closer or with more of the strip in view")
+    lo, hi = np.percentile(np.asarray(draws), [2.5, 97.5])
+    lo, hi = float(min(lo, gap)), float(max(hi, gap))
+    verdict = verdict_for(lo, hi, wheelchair_cm, clearance_cm)
+    need = wheelchair_cm + 2 * clearance_cm
+
+    # cross-check along the image row (valid only when the camera is square to the walkway)
+    row_gap = None
+    if len(pinch) == 2:
+        s_mid = width_cm / ruler.width_px(pinch[:, 1].mean())
+        row_gap = float((pinch[1, 0] - pinch[0, 0]) * s_mid)
+    vp_off = vp[0] - W / 2
+    square = abs(vp_off) <= 0.02 * W
+
+    if verdict == "passes":
+        head = f"corridor {gap:.0f} cm across the walkway (95% band {lo:.0f}-{hi:.0f}) >= {need:.0f} cm needed"
+    elif verdict == "blocked":
+        head = f"corridor {gap:.0f} cm across the walkway (95% band {lo:.0f}-{hi:.0f}) < {wheelchair_cm:.0f} cm chair width"
+    else:
+        head = (f"corridor {gap:.0f} cm across the walkway (95% band {lo:.0f}-{hi:.0f}) is between the "
+                f"{wheelchair_cm:.0f} cm chair width and the {need:.0f} cm needed with clearance")
+    why = [head, f"ruler: {width_cm:.0f} cm tactile strip, scale from its two edges converging at "
+                 f"({vp[0]:.0f}, {vp[1]:.0f}); assumes a level camera (no roll, +-{roll_deg:g} deg in the band) so "
+                 "the horizon is the image row through that point"]
+    if square:
+        why.append(f"camera roughly square to the walkway (vanishing point {vp_off:+.0f} px from centre), so "
+                   "measuring along the image row is also valid"
+                   + ("" if row_gap is None else f" (along-row estimate {row_gap:.0f} cm)"))
+    else:
+        why.append(f"camera not square to the walkway (vanishing point {vp_off:+.0f} px from centre): the gap is "
+                   "measured across the walkway through the vanishing geometry, not along the image row"
+                   + ("" if row_gap is None else f" (along-row estimate would say {row_gap:.0f} cm)"))
+    if extrap_pinch > 0:
+        why.append(f"EXTRAPOLATED: the pinch point is {extrap_pinch:.0f} px of rows outside the strip "
+                   f"(strip covers rows {y_top:.0f}-{y_bot:.0f}); band widened")
+    return {
+        "gap_cm": round(gap, 1), "band_cm": [round(lo, 1), round(hi, 1)], "verdict": verdict, "why": "; ".join(why),
+        "detail": {"gaps": [{"between": lab, "cm": round(d, 1)} for lab, d in nominal], "chosen": nominal[best][0],
+                   "ref": "tactile_strip", "ref_cm": width_cm, "measure": "across-walkway corridor",
+                   "strip_edges": {"left": edges["left"].round(5).tolist(), "right": edges["right"].round(5).tolist(),
+                                   "rows": [round(y_top, 1), round(y_bot, 1)], "rows_used": edges["rows_used"],
+                                   "rows_seen": edges["rows_seen"]},
+                   "vanishing_point": [round(v, 1) for v in vp], "camera_square": bool(square),
+                   "scale_cm_per_px": [[round(float(y), 1), round(float(width_cm / ruler.width_px(y)), 4)]
+                                       for y in pinch[:, 1]],
+                   "pinch_px": pinch.round(1).tolist(), "row_gap_cm": None if row_gap is None else round(row_gap, 1),
+                   "extrapolated_px": round(extrap, 1), "extrapolated_pinch_px": round(extrap_pinch, 1),
+                   "draws": len(draws), "bad_draws": bad, "dropped_contacts": dropped,
+                   "wheelchair_cm": wheelchair_cm, "clearance_cm": clearance_cm},
+    }

@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 REFS = {"a4x4": (0.420, 0.594), "block": (0.30, 0.30)}  # metres, [across, along]
 
 
-def camera(width=1280, height=720, hfov_deg=65.0, cam_h=0.75, cam_x=0.05, pitch_deg=20.0, yaw_deg=4.0):
+def camera(width=1280, height=720, hfov_deg=65.0, cam_h=0.75, cam_x=0.05, pitch_deg=20.0, yaw_deg=4.0, roll_deg=0.0):
     f = (width / 2) / math.tan(math.radians(hfov_deg) / 2)
     th, ps = math.radians(pitch_deg), math.radians(yaw_deg)
     r = np.array([1.0, 0.0, 0.0])
@@ -32,6 +32,9 @@ def camera(width=1280, height=720, hfov_deg=65.0, cam_h=0.75, cam_x=0.05, pitch_
     u = np.cross(d, r)  # image down
     rz = np.array([[math.cos(ps), -math.sin(ps), 0], [math.sin(ps), math.cos(ps), 0], [0, 0, 1]])
     R = np.vstack([rz @ r, rz @ u, rz @ d])
+    if roll_deg:
+        c, s = math.cos(math.radians(roll_deg)), math.sin(math.radians(roll_deg))
+        R = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]]) @ R  # rotate about the optical axis
     return {"f": f, "R": R, "C": np.array([cam_x, 0.0, cam_h]), "w": width, "h": height}
 
 
@@ -64,7 +67,10 @@ def box_corners(x0, x1, y0, y1, h):
 def render_scene(gap_cm: float, dist_m: float, ref: str = "a4x4", box_w=0.40, box_d=0.40, box_h=0.80,
                  ref_ahead_m=0.15, **cam_kw) -> dict:
     """Barriers' near faces at Y = dist_m, inner faces at X = -gap/2 and +gap/2. Reference centred on the gap,
-    its far edge ref_ahead_m in front of the barriers. The camera pitches to frame the reference and the barriers."""
+    its far edge ref_ahead_m in front of the barriers. The camera pitches to frame the reference and the barriers.
+    ref="strip" lays a 30 cm tactile strip along the walkway instead (see render_strip_scene)."""
+    if ref == "strip":
+        return render_strip_scene(gap_cm, dist_m, box_w=box_w, box_d=box_d, box_h=box_h, **cam_kw)
     g = gap_cm / 100.0
     ra, rl = REFS[ref]
     ref_far = dist_m - ref_ahead_m
@@ -84,8 +90,32 @@ def render_scene(gap_cm: float, dist_m: float, ref: str = "a4x4", box_w=0.40, bo
             "pitch_deg": cam_kw["pitch_deg"]}
 
 
+def render_strip_scene(gap_cm: float, dist_m: float, strip_x_m: float = 0.0, strip_w_m: float = 0.30,
+                       strip_near_m: float = 0.3, strip_far_m: float | None = None, box_w=0.40, box_d=0.40,
+                       box_h=0.80, **cam_kw) -> dict:
+    """Same two barriers as render_scene; the reference is a strip_w_m wide strip centred at X = strip_x_m running
+    from Y = strip_near_m (usually below the frame) to strip_far_m (default: 1 m past the barriers). The barriers
+    occlude the strip where they stand in front of it, as they would in a real frame."""
+    g = gap_cm / 100.0
+    far = dist_m + 1.0 if strip_far_m is None else strip_far_m
+    cam_h = cam_kw.get("cam_h", 0.75)
+    cam_kw.setdefault("pitch_deg", math.degrees(math.atan2(cam_h, (1.0 + dist_m + box_d) / 2)))
+    cam = camera(**cam_kw)
+    x0, x1 = strip_x_m - strip_w_m / 2, strip_x_m + strip_w_m / 2
+    strip_pts = np.array([[x0, far, 0], [x1, far, 0], [x1, strip_near_m, 0], [x0, strip_near_m, 0]])
+    left = box_corners(-g / 2 - box_w, -g / 2, dist_m, dist_m + box_d, box_h)
+    right = box_corners(g / 2, g / 2 + box_w, dist_m, dist_m + box_d, box_h)
+    barriers = [raster_convex(cam, project(cam, b)) for b in (left, right)]
+    strip = raster_convex(cam, project(cam, strip_pts)) & ~(barriers[0] | barriers[1])
+    return {"frame_size": (cam["w"], cam["h"]), "ref_mask": strip, "ref_kind": "strip", "strip_width_cm":
+            strip_w_m * 100, "barrier_masks": barriers, "true_gap_cm": gap_cm, "dist_m": dist_m,
+            "pitch_deg": cam_kw["pitch_deg"], "strip_far_m": far}
+
+
 def ground_ref_for(scene: dict, use_mask: bool = True) -> dict:
-    ref = {"kind": "a4x4"} if scene["ref_kind"] == "a4x4" else {"kind": "tactile_block", "n_blocks": 1}
+    if scene["ref_kind"] == "strip":
+        return {"kind": "tactile_strip", "width_cm": scene["strip_width_cm"], "mask": scene["ref_mask"]}
+    ref ={"kind": "a4x4"} if scene["ref_kind"] == "a4x4" else {"kind": "tactile_block", "n_blocks": 1}
     if use_mask:
         ref["mask"] = scene["ref_mask"]
     else:
@@ -98,7 +128,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--gap", type=float, default=90.0, help="true clear gap, cm")
     ap.add_argument("--dist", type=float, default=3.0, help="camera to barrier near faces, m")
-    ap.add_argument("--ref", choices=sorted(REFS), default="a4x4")
+    ap.add_argument("--ref", choices=sorted(REFS) + ["strip"], default="a4x4")
     ap.add_argument("--out", required=True, help="directory for scene.json")
     a = ap.parse_args()
     s = render_scene(a.gap, a.dist, a.ref)

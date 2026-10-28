@@ -1,0 +1,22 @@
+Data in this folder
+
+towing-yangjae.json
+  Seoul Open Data Plaza, 서울시 전동킥보드 견인 현황 (OA-23057, service aiTbAutoKickboard).
+  Licence: Korea Open Government License Type 1 (공공누리 제1유형: 출처표시).
+  Source: 서울특별시, https://data.seoul.go.kr/dataList/OA-23057/S/1/datasetView.do
+  Changes: kept rows whose address is in 서울특별시 서초구 양재동, grouped by lot address, counted by
+  report date and form category (free-text categories folded into one bucket), positions added by
+  geocoding the lot address with the VWorld address API (국토교통부 브이월드, api.vworld.kr).
+
+geocode-vworld.jsonl
+  VWorld address API answers (parcel centroid, EPSG:4326) for the addresses above, one line per address.
+  Provider: 국토교통부 공간정보 오픈플랫폼 브이월드.
+
+yangjae-station.json
+  Seoul Open Data Plaza OA-15994 (SeoulMetroFaciInfo), OA-21212 (tbTraficElvtr),
+  OA-21211 (tbTraficEntrcLft). Licence: Korea Open Government License Type 1 (공공누리 제1유형).
+
+yangjae-exits-osm.json
+  (c) OpenStreetMap contributors, Open Database License 1.0 (ODbL), https://www.openstreetmap.org/copyright
+
+All files are written by scripts/fetch_seoul.py.

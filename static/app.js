@@ -271,25 +271,68 @@
     fd.append('lat', at.lat.toFixed(6));
     fd.append('lon', at.lng.toFixed(6));
     $('#analyze-btn').disabled = true;
-    setStatus('Measuring… this can take a minute.');
-    let res;
-    try {
-      res = await fetch('/api/check', { method: 'POST', body: fd });
-    } catch (e) {
-      res = { ok: false, status: 0, statusText: e.message };
-    }
+    setStatus('Blurring faces on this server, then measuring… this can take a minute.');
+    const result = await getJson('/api/analyze', { method: 'POST', body: fd });
     $('#analyze-btn').disabled = false;
-    if (res.ok) {
-      const result = await res.json();
+    if (result) {
+      useClip(result.video_url);
       showResult(result, false, at);
-      return;
+      setStatus(statusLine(result));
     }
-    const why = res.status ? `HTTP ${res.status}` : res.statusText;
-    setStatus(`Measuring is not connected in this build yet (${why}). Showing sample masks and a sample verdict instead.`, true);
-    await runSample(true, at);
   });
 
-  $('#sample-btn').addEventListener('click', () => runSample(Boolean(clip.files && clip.files[0]), crosshairLatLng()));
+  // GET/POST JSON; on failure, says why in the status line and returns null.
+  async function getJson(url, opts) {
+    let res;
+    try {
+      res = await fetch(url, opts);
+    } catch (e) {
+      setStatus(`Could not reach the server (${e.message}).`, true);
+      return null;
+    }
+    if (res.ok) return res.json();
+    let detail = '';
+    try { detail = (await res.json()).detail; } catch { /* not JSON */ }
+    setStatus(`Could not measure: ${typeof detail === 'string' && detail ? detail : `HTTP ${res.status}`}`, true);
+    return null;
+  }
+
+  // Show the server's face-blurred, normalised clip (the masks refer to its frames), or no video.
+  function useClip(url) {
+    stage.hidden = false;
+    if (url) {
+      if (check.url) { URL.revokeObjectURL(check.url); check.url = null; }
+      stage.classList.remove('no-video');
+      if (video.getAttribute('src') !== url) video.src = url;
+    } else {
+      stage.classList.add('no-video');
+      video.removeAttribute('src');
+    }
+  }
+
+  function statusLine(r) {
+    const b = r.blur || {};
+    const faces = b.faces == null ? '' : ` Faces blurred before upload: ${b.faces} in ${b.frames_with_faces} of ${b.frames} frames.`;
+    const cost = r.cost ? ` Paid SAM frames this check: ${r.cost.sam_frames} ($${Number(r.cost.usd_estimate || 0).toFixed(2)}).` : '';
+    return `${r.sample ? 'Sample clip, replayed results (no live model calls).' : 'Done.'}${faces}${cost}`;
+  }
+
+  $('#sample-btn').addEventListener('click', async () => {
+    const at = crosshairLatLng();
+    if (params.get('verdict')) { await runSample(false, at); return; }  // hand-made UI fixture variants
+    $('#sample-btn').disabled = true;
+    setStatus('Running the sample clip…');
+    const result = await getJson(`/api/sample?lat=${at.lat.toFixed(6)}&lon=${at.lng.toFixed(6)}`);
+    $('#sample-btn').disabled = false;
+    if (!result) return;
+    clip.value = '';
+    $('#analyze-btn').disabled = true;
+    resetResult();
+    useClip(result.video_url);
+    if (!result.video_url) { canvas.width = result.frame_size[0]; canvas.height = result.frame_size[1]; }
+    showResult(result, true, at);
+    setStatus(statusLine(result) + (result.precomputed ? ' The clip itself is not on this server, so only the masks are shown.' : ''));
+  });
   $('#again-btn').addEventListener('click', () => {
     clip.value = '';
     if (check.url) { URL.revokeObjectURL(check.url); check.url = null; }
@@ -333,7 +376,11 @@
     }
     const variant = fixture.variants[params.get('verdict')] ? params.get('verdict') : fixture.default_variant;
     const v = fixture.variants[variant];
-    const result = { sam: fixture.sam, measurement: v.measurement, explanation: v.explanation };
+    const m = v.measurement || {};
+    const result = {
+      masks: fixture.sam, verdict: m.verdict, gap_cm: m.gap_cm, band_cm: m.band_cm, why: m.why,
+      explanation: v.explanation && v.explanation.text, handmade: true,
+    };
     if (!keepVideo) {
       stage.hidden = false;
       stage.classList.add('no-video');
@@ -349,46 +396,54 @@
     check.result = result;
     check.sample = sample;
     check.maskCache.clear();
-    const tracks = toTracks(result.sam);
+    const tracks = toTracks(result);
+    const shown = tracks.filter((t) => t.frames.length);
     $('#mask-legend').innerHTML = (sample ? '<span class="sample-tag">Sample</span>' : '')
-      + tracks.map((t, k) => `<span><i style="background:${MASK_COLORS[k % MASK_COLORS.length]}"></i>${esc(t.concept)}</span>`).join('');
+      + (shown.length ? shown.map((t) => `<span><i style="background:${t.color}"></i>${esc(t.concept)}${t.role === 'reference' ? ' (scale reference)' : ''}</span>`).join('')
+        : '<span>No masks found</span>');
     $('#stage-ctl').hidden = false;
     renderVerdict(result, sample);
     dropPin(result, at);
     if (stage.classList.contains('no-video')) { check.playing = false; togglePlay(); } else { draw(); video.play().catch(() => {}); }
     loopForVideo();
+    $('#verdict').focus({ preventScroll: false });
   }
 
-  function toTracks(sam) {
-    if (!sam) return [];
-    return (Array.isArray(sam) ? sam : [sam]).map((t) => ({ ...t, frames: [...(t.frames || [])].sort((a, b) => a.i - b.i) }));
+  // result.masks: [{concept, role, source, frames: [{i, objects: [{id, polygon, polygons}]}]}] in frame_size pixels.
+  function toTracks(result) {
+    const list = result.masks || result.sam || [];
+    const [w, h] = result.frame_size || [];
+    return (Array.isArray(list) ? list : [list]).map((t, k) => ({
+      ...t,
+      width: t.width || w,
+      height: t.height || h,
+      fps: t.fps || result.fps,
+      color: t.role === 'reference' ? '#7ee081' : MASK_COLORS[k % MASK_COLORS.length],
+      frames: [...(t.frames || [])].sort((a, b) => a.i - b.i),
+    }));
   }
 
   function renderVerdict(result, sample) {
-    const m = result.measurement || {};
     const tri = result.triage;
-    let verdict = VERDICT_WORD[m.verdict] ? m.verdict : 'unknown';
-    let why = m.why || '';
-    if (tri && tri.usable === false) {
-      verdict = 'unknown';
-      why = `The clip could not be used: ${(tri.reasons || []).join('; ') || 'no reason given'}.`;
-    }
+    const verdict = VERDICT_WORD[result.verdict] ? result.verdict : 'unknown';
     const card = $('#verdict');
     card.dataset.verdict = verdict;
     $('#verdict-icon').setAttribute('href', `#v-${verdict}`);
     $('#verdict-text').textContent = VERDICT_WORD[verdict];
     const kicker = $('#verdict-kicker');
-    kicker.textContent = sample ? 'Sample · not a measurement' : 'Measured from your clip';
+    kicker.textContent = result.handmade ? 'Sample · hand-made, not a measurement'
+      : sample ? 'Sample clip · replayed model results' : 'Measured from your clip';
     kicker.classList.toggle('sample', sample);
-    $('#v-gap').textContent = m.gap_cm == null ? '—' : `${Math.round(m.gap_cm)} cm`;
-    $('#v-band').textContent = Array.isArray(m.band_cm) ? `${Math.round(m.band_cm[0])}–${Math.round(m.band_cm[1])} cm` : '—';
-    $('#v-why').textContent = why;
-    $('#v-explain').textContent = (result.explanation && result.explanation.text) || '';
-    const tracks = toTracks(result.sam);
-    const src = [...new Set(tracks.map((t) => t.source).filter(Boolean))].join(', ');
-    $('#v-model').textContent = sample
+    $('#v-gap').textContent = result.gap_cm == null ? '—' : `${Math.round(result.gap_cm)} cm`;
+    $('#v-band').textContent = Array.isArray(result.band_cm) ? `${Math.round(result.band_cm[0])}–${Math.round(result.band_cm[1])} cm` : '—';
+    $('#v-why').textContent = result.why || '';
+    $('#v-explain').textContent = typeof result.explanation === 'string' ? result.explanation : (result.explanation?.text || '');
+    const md = result.models || {};
+    const srcs = [...new Set(toTracks(result).map((t) => t.source).filter(Boolean))].join(', ');
+    const triTxt = tri && tri.usable == null ? 'triage skipped' : `triage ${md.triage || 'unknown'}`;
+    $('#v-model').textContent = result.handmade
       ? 'Masks and text are a hand-made fixture for testing the screen.'
-      : `Explained by ${result.explanation?.model || 'unknown model'}${src ? ` · masks: ${src}` : ''} · width from geometry, not from the model.`;
+      : `Masks ${md.sam || 'SAM'}${srcs ? ` (${srcs})` : ''} · ${triTxt} · text ${md.explain || 'none'} · width from geometry, not from a model.`;
     $('#confirm-btn').disabled = false;
     $('#confirm-btn').textContent = 'Confirm this pin';
     card.hidden = false;
@@ -403,8 +458,8 @@
     });
   }
   function dropPin(result, at) {
-    const m = result.measurement || {};
-    const verdict = (result.triage && result.triage.usable === false) || !VERDICT_WORD[m.verdict] ? 'unknown' : m.verdict;
+    const m = result;
+    const verdict = VERDICT_WORD[m.verdict] ? m.verdict : 'unknown';
     if (check.pin && !check.pin.confirmed) pinLayer.removeLayer(check.pin.marker);
     const marker = L.marker(at, { icon: pinIcon(verdict, false), draggable: true, keyboard: true, title: `Checked spot: ${VERDICT_WORD[verdict]}`, zIndexOffset: 1000 })
       .bindPopup(() => `<h4>${VERDICT_WORD[verdict]}${check.sample ? ' (sample)' : ''}</h4><p>${m.gap_cm == null ? 'No width measured' : `Gap ${Math.round(m.gap_cm)} cm`}${Array.isArray(m.band_cm) ? ` (${Math.round(m.band_cm[0])}–${Math.round(m.band_cm[1])} cm)` : ''}</p><p class="ko">${check.pin && check.pin.confirmed ? 'Confirmed' : 'Not confirmed yet. Drag to adjust.'}</p>`)
@@ -480,22 +535,27 @@
     }
     if (!check.result || !$('#mask-toggle').checked) return;
     const t = tOverride ?? (noVideo ? 0 : video.currentTime);
-    toTracks(check.result.sam).forEach((track, k) => {
-      const color = MASK_COLORS[k % MASK_COLORS.length];
+    toTracks(check.result).forEach((track, k) => {
+      const { color } = track;
       const f = frameAt(track, t);
       if (!f) return;
       const sx = canvas.width / (track.width || canvas.width);
       const sy = canvas.height / (track.height || canvas.height);
       for (const o of f.objects || []) {
-        if (o.polygon && o.polygon.length > 2) {
+        const polys = o.polygons || (o.polygon ? [o.polygon] : []);
+        if (polys.length) {
           ctx.beginPath();
-          o.polygon.forEach(([x, y], n) => (n ? ctx.lineTo(x * sx, y * sy) : ctx.moveTo(x * sx, y * sy)));
-          ctx.closePath();
-          ctx.fillStyle = `${color}73`;
-          ctx.fill();
+          polys.filter((p) => p.length > 2).forEach((p) => {
+            p.forEach(([x, y], n) => (n ? ctx.lineTo(x * sx, y * sy) : ctx.moveTo(x * sx, y * sy)));
+            ctx.closePath();
+          });
+          ctx.fillStyle = `${color}66`;
+          ctx.fill('evenodd');
           ctx.lineWidth = Math.max(2, canvas.width / 320);
+          ctx.setLineDash(track.role === 'reference' ? [8, 6] : []);
           ctx.strokeStyle = color;
           ctx.stroke();
+          ctx.setLineDash([]);
         } else if (o.mask_rle) {
           const key = `${k}:${f.i}:${o.id}`;
           let off = check.maskCache.get(key);
