@@ -1,0 +1,20 @@
+#!/bin/bash
+# Block commits that contain any value from ~/.config/barrier-lens/.env or obvious key shapes.
+ENV="$HOME/.config/barrier-lens/.env"
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+if [ -f "$ENV" ]; then
+  vals=$(grep -E '^[A-Z_]+=' "$ENV" | cut -d= -f2- | awk 'length($0) >= 12')
+  if [ -n "$vals" ]; then
+    # shellcheck disable=SC2086
+    if git diff --cached -U0 -- $staged | grep -F -f <(printf '%s\n' "$vals") >/dev/null; then
+      echo "pre-commit: a value from ~/.config/barrier-lens/.env is in the staged diff. Commit blocked." >&2
+      exit 1
+    fi
+  fi
+fi
+if git diff --cached -U0 -- $staged | grep -E -e 'BEGIN [A-Z ]*PRIVATE KEY' -e 'AKIA[0-9A-Z]{16}' -e 'ghp_[A-Za-z0-9]{30,}' >/dev/null; then
+  echo "pre-commit: something that looks like a secret is staged. Commit blocked." >&2
+  exit 1
+fi
+exit 0
