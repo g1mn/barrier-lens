@@ -417,3 +417,31 @@ def test_triage_needs_a_path_state_with_evidence_for_closed():
     clean, errors, _ = spark._validate_triage({**base, "path": {"state": "closed", "frames": [0, 2],
                                                                 "evidence": "SIDEWALK CLOSED sign across it"}}, 6)
     assert not errors and clean["path"]["state"] == "closed"
+
+
+def test_measured_gap_carries_its_two_image_points(env, scene, clip_src):
+    """The ruler drawn on the clip comes from geometry's own two ground points, not from the screen."""
+    _write_sam_fixture(env / "fixtures", "bollard", scene["barrier_masks"], scene["frame_size"])
+    _write_sam_fixture(env / "fixtures", "paper", [scene["ref_mask"]], scene["frame_size"])
+    asyncio.run(_seed_triage(clip_src))
+    r = asyncio.run(analyze.analyze(clip_src, 37.484, 127.034, replay=True))
+    ends = r["measurement_detail"]["gap_px"]
+    w, h = scene["frame_size"]
+    assert len(ends) == 2 and all(0 <= x <= w and 0 <= y <= h for x, y in ends)
+    xs = sorted(x for x, _ in ends)
+    # the two ends sit on different bollards: each end is inside (or next to) one barrier mask's columns
+    cols = [np.where(m.any(axis=0))[0] for m in scene["barrier_masks"]]
+    owners = {k for x in xs for k, c in enumerate(cols) if c.min() - 3 <= x <= c.max() + 3}
+    assert len(owners) == 2, (xs, [(c.min(), c.max()) for c in cols])
+
+
+def test_named_recorded_samples(env):
+    from fastapi.testclient import TestClient
+    from app.main import app
+    c = TestClient(app)
+    j = c.get("/api/sample", params={"name": "closed"}).json()
+    assert j["verdict"] == "blocked" and j["triage"]["path"]["state"] == "closed"
+    assert j["measurement_detail"]["override"] == "path_closed" and c.get(j["video_url"]).status_code == 200
+    s = c.get("/api/sample", params={"name": "scooters"}).json()
+    assert len(s["measurement_detail"]["gap_px"]) == 2 and s["recorded"]["name"] == "scooters"
+    assert c.get("/api/sample", params={"name": "nope"}).status_code == 404

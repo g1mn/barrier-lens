@@ -228,6 +228,26 @@ def _line_distance(a: np.ndarray, line_pts: np.ndarray) -> float:
     return float(np.abs((a - p) @ n).min())
 
 
+def _gap_ends_px(label: str, contacts: list, labels: list, edge_img, to_ground) -> list | None:
+    """Image points of the two ends of a measured passage at the nominal pose (for drawing a ruler on the frame).
+    to_ground maps image points to ground points; contacts and edge are all in front of the horizon here."""
+    try:
+        a_lab, b_lab = label.split("|")
+        sets = [edge_img if lab == "edge" else contacts[labels.index(lab)] for lab in (a_lab, b_lab)]
+        if any(x is None or len(x) == 0 for x in sets):
+            return None
+        if "edge" in (a_lab, b_lab):  # sample the edge segment densely so the nearest point is a real image point
+            e0, e1 = np.asarray(edge_img, float)
+            dense = e0 + np.linspace(0.0, 1.0, 200)[:, None] * (e1 - e0)
+            sets = [dense if lab == "edge" else st for lab, st in zip((a_lab, b_lab), sets)]
+        ga, gb = to_ground(np.asarray(sets[0], float)), to_ground(np.asarray(sets[1], float))
+        d = ((ga[:, None, :] - gb[None, :, :]) ** 2).sum(axis=2)
+        i, j = np.unravel_index(int(np.argmin(d)), d.shape)
+        return [np.round(sets[0][i], 1).tolist(), np.round(sets[1][j], 1).tolist()]
+    except (ValueError, IndexError):
+        return None
+
+
 def _passages(ground_sets: list[np.ndarray], edge: np.ndarray | None, labels: list[str]):
     """Neighbour passages, left to right: [(label, distance)]."""
     order = np.argsort([np.median(g[:, 0]) for g in ground_sets])
@@ -362,6 +382,7 @@ def measure_gap(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
     nominal = run(H, contacts, edge_img)
     best = int(np.argmax([d for _, d in nominal]))
     gap = nominal[best][1]
+    gap_px = _gap_ends_px(nominal[best][0], contacts, labels, edge_img, lambda pts: _to_ground(H, pts)[0])
 
     rng = np.random.default_rng(seed)
     draws, bad = [], 0
@@ -393,6 +414,7 @@ def measure_gap(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
     return {
         "gap_cm": round(gap, 1), "band_cm": [round(lo, 1), round(hi, 1)], "verdict": verdict, "why": why,
         "detail": {"gaps": [{"between": lab, "cm": round(d, 1)} for lab, d in nominal], "chosen": nominal[best][0],
+                   "gap_px": gap_px,
                    "ref_px": corners.round(2).tolist(), "ref_cm": [across, along], "ref_min_side_px":
                    round(float(sides.min()), 1), "draws": len(draws), "bad_draws": bad,
                    "dropped_contacts": dropped, "wheelchair_cm": wheelchair_cm, "clearance_cm": clearance_cm},
@@ -682,6 +704,7 @@ def measure_gap_strip(ground_ref: dict, barrier_masks: list, frame_size: tuple, 
                    "scale_cm_per_px": [[round(float(y), 1), round(float(width_cm / ruler.width_px(y)), 4)]
                                        for y in pinch[:, 1]],
                    "pinch_px": pinch.round(1).tolist(), "row_gap_cm": None if row_gap is None else round(row_gap, 1),
+                   "gap_px": pinch.round(1).tolist() if len(pinch) == 2 else None,
                    "extrapolated_px": round(extrap, 1), "extrapolated_pinch_px": round(extrap_pinch, 1),
                    "draws": len(draws), "bad_draws": bad, "dropped_contacts": dropped,
                    "wheelchair_cm": wheelchair_cm, "clearance_cm": clearance_cm},
@@ -1002,6 +1025,8 @@ def measure_gap_pose(ground_ref: dict, barrier_masks: list, frame_size: tuple, *
     if nominal is None:
         return _unknown("walkway edge lies above the horizon for the nominal camera pose")
     best = int(np.argmax([d for _, d in nominal]))
+    gap_px = _gap_ends_px(nominal[best][0], contacts, labels, edge_img,
+                          lambda pts: ray_to_ground(pts, (W, Hpx), f0, p_nom, roll0, h0)[0])
 
     def simulate(n, vary):
         out, bad = [], 0
@@ -1087,7 +1112,7 @@ def measure_gap_pose(ground_ref: dict, barrier_masks: list, frame_size: tuple, *
     return {
         "gap_cm": round(gap, 1), "band_cm": [round(lo, 1), round(hi, 1)], "verdict": verdict, "why": why,
         "detail": {"mode": "camera_pose", "gaps": [{"between": lab, "cm": round(d, 1)} for lab, d in nominal],
-                   "chosen": nominal[best][0], "pose": pose_out, "ground_lines": lines_out,
+                   "chosen": nominal[best][0], "gap_px": gap_px, "pose": pose_out, "ground_lines": lines_out,
                    "error_sources_cm": {k: round(v, 1) for k, v in sens.items()}, "dominant_error": dominant,
                    "draws": len(draws), "bad_draws": bad, "dropped_contacts": dropped,
                    "wheelchair_cm": wheelchair_cm, "clearance_cm": clearance_cm},

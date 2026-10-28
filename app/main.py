@@ -127,10 +127,11 @@ def api_analyze_clip(job: str) -> FileResponse:
 async def api_sample(
     lat: float | None = Query(None, ge=-90, le=90),
     lon: float | None = Query(None, ge=-180, le=180),
+    name: str | None = Query(None, pattern="^[a-z]{1,20}$", description="a recorded run: scooters or closed"),
 ) -> dict:
-    """The same check on a bundled dev clip in replay mode (no paid calls), or a precomputed result."""
+    """The same check on a bundled dev clip in replay mode (no paid calls), or a recorded live run."""
     try:
-        return await _analyze.run_sample(lat, lon)
+        return await _analyze.run_sample(lat, lon, name=name)
     except _analyze.AnalyzeError as e:
         raise HTTPException(404, str(e)) from None
     except _blur.BlurError as e:
@@ -147,10 +148,12 @@ async def api_sample_post(
     lon: float | None = Form(None, ge=-180, le=180),
     profile: str | None = Form(None),
     sensor: str | None = Form(None),
+    name: str | None = Form(None, pattern="^[a-z]{1,20}$"),
 ) -> dict:
     """GET /api/sample with the user's calibration profile applied (replay mode, no paid calls)."""
     try:
-        return await _analyze.run_sample(lat, lon, profile=_cal.parse_json(profile), sensor=_cal.parse_json(sensor))
+        return await _analyze.run_sample(lat, lon, profile=_cal.parse_json(profile), sensor=_cal.parse_json(sensor),
+                                         name=name)
     except _analyze.AnalyzeError as e:
         raise HTTPException(404, str(e)) from None
     except _blur.BlurError as e:

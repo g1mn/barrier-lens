@@ -1,5 +1,10 @@
-scooters-city-live.mp4 — first 10 s of "Urban Electric Scooters Parked in Cityscape" by FABIO REIS DE ABREU (PORTUGA),
-https://www.pexels.com/video/urban-electric-scooters-parked-in-cityscape-36383602/ (Pexels License: free to use and modify).
-Normalised to 10 fps and 1280x720, faces blurred on our server (OpenCV YuNet) before any model saw it.
-Licence plates are not detected automatically (no plate detector).
-scooters-city-live.json — the response of a live /api/analyze run on that clip, 2026-10-28 22:41 KST.
+Both clips are the first 10 s of Pexels videos (Pexels License: free to use and modify), normalised to 10 fps and
+1280x720 (or 720x1280), faces blurred on our server (OpenCV YuNet) before any model saw them. Licence plates are not
+detected automatically (no plate detector); none are readable in these clips at this size (checked by eye 10-29).
+
+scooters-city-live.mp4 — "Urban Electric Scooters Parked in Cityscape" by FABIO REIS DE ABREU (PORTUGA),
+  https://www.pexels.com/video/urban-electric-scooters-parked-in-cityscape-36383602/
+sidewalk-closed-live.mp4 — "Sidewalk Closed Due to Construction" by BJ Zurc,
+  https://www.pexels.com/video/sidewalk-closed-due-to-construction-35845191/
+
+The .json next to each clip is the response of a live /api/analyze run on it (2026-10-29, Muse Spark 1.3 + SAM 3.1).

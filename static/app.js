@@ -331,22 +331,24 @@
     const b = r.blur || {};
     const faces = b.faces == null ? '' : ` Faces blurred before upload: ${b.faces} in ${b.frames_with_faces} of ${b.frames} frames.`;
     const cost = r.cost ? ` ${r.recorded ? 'SAM frames billed when it was recorded' : 'Paid SAM frames this check'}: ${r.cost.sam_frames} ($${Number(r.cost.usd_estimate || 0).toFixed(2)}).` : '';
-    const head = r.recorded ? `Recorded live run (${r.models.triage} and ${r.models.sam} on the Meta Model API, ${r.recorded.at.slice(0, 10)}), replayed with no model calls now.`
+    const head = r.recorded ? `${r.recorded.about ? `${r.recorded.about} ` : ''}Recorded live run (${r.models.triage} and ${r.models.sam} on the Meta Model API, ${r.recorded.at.slice(0, 10)}), replayed with no model calls now.`
       : r.sample ? 'Sample clip, replayed results (no live model calls).' : 'Done.';
     return `${head}${faces}${cost}`;
   }
 
-  $('#sample-btn').addEventListener('click', async () => {
+  const sampleBtns = [$('#sample-btn'), $('#sample-closed-btn')];
+  sampleBtns.forEach((btn) => btn.addEventListener('click', async () => {
     const at = crosshairLatLng();
     if (params.get('verdict')) { await runSample(false, at); return; }  // hand-made UI fixture variants
-    $('#sample-btn').disabled = true;
-    setStatus('Running the sample clip…');
+    sampleBtns.forEach((x) => { x.disabled = true; });
+    setStatus('Loading the sample clip…');
     const sfd = new FormData();
     sfd.append('lat', at.lat.toFixed(6));
     sfd.append('lon', at.lng.toFixed(6));
+    sfd.append('name', btn.dataset.sample);
     if (profile) sfd.append('profile', JSON.stringify(profile));
     const result = await getJson('/api/sample', { method: 'POST', body: sfd });
-    $('#sample-btn').disabled = false;
+    sampleBtns.forEach((x) => { x.disabled = false; });
     if (!result) return;
     clip.value = '';
     $('#analyze-btn').disabled = true;
@@ -355,7 +357,7 @@
     if (!result.video_url) { canvas.width = result.frame_size[0]; canvas.height = result.frame_size[1]; }
     showResult(result, true, at);
     setStatus(statusLine(result) + (result.precomputed ? ' The clip itself is not on this server, so only the masks are shown.' : ''));
-  });
+  }));
   $('#again-btn').addEventListener('click', () => {
     clip.value = '';
     if (check.url) { URL.revokeObjectURL(check.url); check.url = null; }
@@ -510,6 +512,7 @@
     kicker.classList.toggle('sample', sample);
     // unknown: the middle of a too-wide range is not an answer, so it is shown as a best guess, not a headline
     $('#v-nums').classList.toggle('weak', verdict === 'unknown');
+    $('#v-nums').hidden = result.gap_cm == null && !Array.isArray(result.band_cm);  // e.g. blocked because the path is closed
     $('#v-gap-label').textContent = verdict === 'unknown' ? 'Best guess (not an answer)' : 'Measured gap';
     $('#v-gap').textContent = result.gap_cm == null ? '—' : `${Math.round(result.gap_cm)} cm`;
     $('#v-band').textContent = Array.isArray(result.band_cm) ? bandText(result.band_cm) : '—';
@@ -645,6 +648,39 @@
         }
       }
     });
+    drawRuler();
+  }
+
+  // The measured gap as a ruler between its two ground points (measurement_detail.gap_px, frame pixels).
+  function drawRuler() {
+    const r = check.result;
+    const ends = r && r.measurement_detail && r.measurement_detail.gap_px;
+    if (!ends || ends.length !== 2 || r.gap_cm == null) return;
+    const [fw, fh] = r.frame_size || [canvas.width, canvas.height];
+    const sx = canvas.width / fw, sy = canvas.height / fh;
+    const [[x1, y1], [x2, y2]] = ends.map(([x, y]) => [x * sx, y * sy]);
+    const lw = Math.max(3, canvas.width / 240);
+    const ang = Math.atan2(y2 - y1, x2 - x1), tick = lw * 4;
+    const nx = -Math.sin(ang) * tick, ny = Math.cos(ang) * tick;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for (const [w, c] of [[lw + 4, 'rgba(0,0,0,.75)'], [lw, '#ffd23f']]) {
+      ctx.lineWidth = w; ctx.strokeStyle = c;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+      ctx.moveTo(x1 - nx, y1 - ny); ctx.lineTo(x1 + nx, y1 + ny);
+      ctx.moveTo(x2 - nx, y2 - ny); ctx.lineTo(x2 + nx, y2 + ny);
+      ctx.stroke();
+    }
+    const band = Array.isArray(r.band_cm) ? ` (${Math.round(r.band_cm[0])}–${r.band_cm[1] > BAR_MAX_CM ? `${BAR_MAX_CM}+` : Math.round(r.band_cm[1])})` : '';
+    const label = `${r.verdict === 'unknown' ? '≈' : ''}${Math.round(r.gap_cm)} cm${band}`;
+    ctx.font = `700 ${Math.max(14, canvas.width / 40)}px system-ui, sans-serif`;
+    const tw = ctx.measureText(label).width, pad = 6, th = Math.max(14, canvas.width / 40) + pad;
+    const lx = Math.min(Math.max((x1 + x2) / 2 - tw / 2 - pad, 0), canvas.width - tw - 2 * pad);
+    const ly = Math.max(Math.min(y1, y2) - th - tick, 0);
+    ctx.fillStyle = 'rgba(0,0,0,.78)'; ctx.fillRect(lx, ly, tw + 2 * pad, th);
+    ctx.fillStyle = '#ffd23f'; ctx.textBaseline = 'top'; ctx.fillText(label, lx + pad, ly + pad / 2);
+    ctx.restore();
   }
 
   // video-synced redraw
