@@ -25,7 +25,7 @@ Full URLs and licence links are in `data/eval/manifest.json`.
 
 ## Privacy
 
-Before any of these appear in the demo video: blur the licence plate on the car at the far left of `graz-kronesgasse-85` and the distant pedestrian in `graz-muenzgraben-corner` (rule in AGENTS.md).
+These Commons photos are used as published, under their licences, and are kept out of the demo video (rule in AGENTS.md). `graz-kronesgasse-85` shows a car at the far left whose plate is partly legible at full size, and `graz-muenzgraben-corner` a distant pedestrian too small to identify; blur both before using either anywhere else.
 
 ## Searched, not used
 
@@ -34,7 +34,9 @@ Before any of these appear in the demo video: blur the licence plate on the car 
 - `Steinbogen-Fußgängerbrücke Altenplathow 02`: deck not visible.
 - Commons full-text search for "Gehweg Breite", "Gehwegbreite", "Restgehwegbreite", "Durchgangsbreite", "sidewalk width", "trottoir largeur", Polish/Spanish equivalents: mostly scanned books. Commons rate-limits search (HTTP 429) after a handful of rapid queries; the script backs off.
 
-## Google SANPO (checked, not downloaded)
+## Google SANPO (used for the known-camera sample)
+
+One 10 s clip of session `Xoe7Kec_tA-bzqYd6hDEMMF6-rFrZx1b` became the *known camera* demo sample (`static/demo/sanpo-corridor-live.*`, credits and changes in `static/demo/ATTRIBUTION.txt`, method and stereo cross-check in `docs/sanpo-check.md`). The notes below are from the first look at the dataset.
 
 - Licence: CC BY 4.0 (README of github.com/google-research-datasets/sanpo_dataset). README says faces and plates are blurred and the full set is ~6 TB.
 - Public bucket, no login: `https://storage.googleapis.com/gresearch/sanpo_dataset/v0/`. Listing via the JSON API works (`storage/v1/b/gresearch/o?prefix=…`).

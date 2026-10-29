@@ -1,5 +1,10 @@
 .env
 *.env
+.env.*
+*.dotenv
+demo-token
+.pytest_cache/
+.muse/
 .venv/
 __pycache__/
 *.pyc

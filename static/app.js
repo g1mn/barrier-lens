@@ -52,6 +52,7 @@
     maxZoom: 19,
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   }).addTo(map);
+  // keep: replaces Leaflet's default flag-emoji prefix with a plain Leaflet link.
   map.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
   map.attributionControl.addAttribution('Towing, elevators: <a href="https://data.seoul.go.kr/">Seoul Open Data</a> (KOGL Type 1)');
 
@@ -68,6 +69,14 @@
 
   function barH() { return $('.bar').offsetHeight; }
   function isWide() { return window.matchMedia('(min-width: 900px)').matches; }
+  // Narrow screens: the bottom sheet covers the bottom-right corner, so the credit line moves to the top.
+  let narrowCredit = null;
+  function placeAttribution() {
+    const narrow = !isWide();
+    if (narrow === narrowCredit) return;
+    narrowCredit = narrow;
+    map.attributionControl.setPosition(narrow ? 'topleft' : 'bottomright');
+  }
   function visibleMapBox() {
     const top = barH();
     if (isWide()) {
@@ -78,6 +87,7 @@
   }
   function layout() {
     document.documentElement.style.setProperty('--bar-h', `${barH()}px`);
+    placeAttribution();
     const b = visibleMapBox();
     crosshair.style.left = `${(b.left + b.right) / 2}px`;
     crosshair.style.top = `${(b.top + b.bottom) / 2}px`;
@@ -388,10 +398,17 @@
     }
   }
 
+  // Sample and recorded clips were filmed elsewhere; the pin sits at the crosshair, not where they were filmed.
+  function clipOrigin(r) {
+    if (!r.sample && !r.recorded) return '';
+    return (r.recorded && r.recorded.about) || 'Sample clip filmed elsewhere — the pin position is illustrative';
+  }
   function statusLine(r) {
     const b = r.blur || {};
     const faces = b.faces == null ? '' : ` Face detections blurred before upload: ${b.faces} in ${b.frames_with_faces} of ${b.frames} frames.`;
-    const cost = r.cost ? ` ${r.recorded ? 'SAM frames billed when it was recorded' : 'Paid SAM frames this check'}: ${r.cost.sam_frames} ($${Number(r.cost.usd_estimate || 0).toFixed(2)}).` : '';
+    const cost = !r.cost ? '' : (r.recorded && r.cost.sam_frames === 0)
+      ? ' SAM masks reused from an earlier live call of this clip (not billed again).'
+      : ` ${r.recorded ? 'SAM frames billed when it was recorded' : 'Paid SAM frames this check'}: ${r.cost.sam_frames} ($${Number(r.cost.usd_estimate || 0).toFixed(2)}).`;
     const head = r.recorded ? `${r.recorded.about ? `${r.recorded.about} ` : ''}Recorded live run (${r.models.triage} and ${r.models.sam} on the Meta Model API, ${r.recorded.at.slice(0, 10)}), replayed with no model calls now.`
       : r.sample ? 'Sample clip, replayed results (no live model calls).' : 'Done.';
     return `${head}${faces}${cost}`;
@@ -539,9 +556,11 @@
   }
   function renderNotes(r) {
     const notes = (r.notes || []).filter(Boolean);
+    const items = notes.map((n) => `<li>${esc(n)}</li>`);
+    if (notes.some((n) => n.includes('CC BY'))) items.push('<li><a href="/static/demo/ATTRIBUTION.txt">SANPO dataset (Google Research), CC BY 4.0 — modified; full credits</a></li>');
     const ul = $('#v-notes');
-    ul.innerHTML = notes.map((n) => `<li>${esc(n)}</li>`).join('');
-    ul.hidden = !notes.length;
+    ul.innerHTML = items.join('');
+    ul.hidden = !items.length;
   }
   // What Muse Spark saw (path state, evidence) next to what SAM 3.1 outlined; says so when they disagree.
   const PATH_WORD = { open: 'Path looks open', narrowed: 'Path is narrowed', closed: 'Path is closed' };
@@ -605,7 +624,7 @@
     $('#verdict-text').textContent = VERDICT_WORD[verdict];
     const kicker = $('#verdict-kicker');
     kicker.textContent = result.handmade ? 'Sample · hand-made, not a measurement'
-      : sample ? 'Sample clip · replayed model results' : 'Measured from your clip';
+      : sample ? 'Sample clip, filmed elsewhere · replayed model results' : 'Measured from your clip';
     kicker.classList.toggle('sample', sample);
     // unknown: the middle of a too-wide range is not an answer, so it is shown as a best guess, not a headline
     $('#v-nums').classList.toggle('weak', verdict === 'unknown');
@@ -642,9 +661,10 @@
   function dropPin(result, at) {
     const m = result;
     const verdict = VERDICT_WORD[m.verdict] ? m.verdict : 'unknown';
+    const origin = clipOrigin(m);
     if (check.pin && !check.pin.confirmed) pinLayer.removeLayer(check.pin.marker);
     const marker = L.marker(at, { icon: pinIcon(verdict, false), draggable: true, keyboard: true, title: `Checked spot: ${VERDICT_WORD[verdict]}`, zIndexOffset: 1000 })
-      .bindPopup(() => `<h4>${VERDICT_WORD[verdict]}${check.sample ? ' (sample)' : ''}</h4><p>${m.gap_cm == null ? 'No width measured' : `Gap ${Math.round(m.gap_cm)} cm`}${Array.isArray(m.band_cm) ? ` (${Math.round(m.band_cm[0])}–${Math.round(m.band_cm[1])} cm)` : ''}</p><p class="ko">${check.pin && check.pin.confirmed ? 'Confirmed' : 'Not confirmed yet. Drag to adjust.'}</p>`)
+      .bindPopup(() => `<h4>${VERDICT_WORD[verdict]}${check.sample ? ' (sample)' : ''}</h4>${origin ? `<p>${esc(origin)}</p>` : ''}<p>${m.gap_cm == null ? 'No width measured' : `Gap ${Math.round(m.gap_cm)} cm`}${Array.isArray(m.band_cm) ? ` (${Math.round(m.band_cm[0])}–${Math.round(m.band_cm[1])} cm)` : ''}</p><p class="ko">${check.pin && check.pin.confirmed ? 'Confirmed' : 'Not confirmed yet. Drag to adjust.'}</p>`)
       .addTo(pinLayer);
     check.pin = { marker, verdict, confirmed: false };
   }

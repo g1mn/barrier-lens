@@ -190,7 +190,7 @@ def api_analyze_clip(job: str) -> FileResponse:
 async def api_sample(
     lat: float | None = Query(None, ge=-90, le=90),
     lon: float | None = Query(None, ge=-180, le=180),
-    name: str | None = Query(None, pattern="^[a-z]{1,20}$", description="a recorded run: scooters or closed"),
+    name: str | None = Query(None, pattern="^[a-z]{1,20}$", description="a recorded run: scooters, closed or known"),
 ) -> dict:
     """The same check on a bundled dev clip in replay mode (no paid calls), or a recorded live run."""
     try:

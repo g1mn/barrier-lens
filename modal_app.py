@@ -1,7 +1,8 @@
 """Barrier Lens on Modal: the same FastAPI app as the Dockerfile, on a 4-CPU container so a live check (face blur on
 every frame, then the Meta model calls) takes about a minute instead of several on a 0.1-CPU free host.
 
-  modal secret create barrier-lens --from-dotenv <file with META_API_KEY, BL_DEMO_TOKEN, BL_SPEND_CAP_USD, SPARK_BACKEND>
+  modal secret create barrier-lens --from-dotenv <file OUTSIDE the repo, e.g. ~/.config/barrier-lens/modal.env, with
+                                                  META_API_KEY, BL_DEMO_TOKEN, BL_SPEND_CAP_USD, SPARK_BACKEND>
   modal deploy modal_app.py
 
 Keys live only in the Modal secret. Uploaded clips and the spend ledger are on the container's own disk, so they

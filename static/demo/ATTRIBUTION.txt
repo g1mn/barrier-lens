@@ -6,14 +6,18 @@ scooters-city-live.mp4 — "Urban Electric Scooters Parked in Cityscape" by FABI
   https://www.pexels.com/video/urban-electric-scooters-parked-in-cityscape-36383602/
 sidewalk-closed-live.mp4 — "Sidewalk Closed Due to Construction" by BJ Zurc,
   https://www.pexels.com/video/sidewalk-closed-due-to-construction-35845191/
+Not in this folder, credited anyway: "A Row of Electric Scooters Parked on the Sidewalk" by Alberto Escalona,
+  https://www.pexels.com/video/a-row-of-electric-scooters-parked-on-the-sidewalk-15421497/ — the clip uploaded in the
+  demo video's live run, and the source of the SAM test fixtures in data/fixtures/sam/scooters-row-* (masks only, no image data).
+None of these Pexels clips was filmed in Seoul; a pin a sample drops on the map is illustrative.
 
 sanpo-corridor-live.mp4 — from the SANPO dataset by Google Research, CC BY 4.0
   (https://github.com/google-research-datasets/sanpo_dataset, https://creativecommons.org/licenses/by/4.0/).
   Session Xoe7Kec_tA-bzqYd6hDEMMF6-rFrZx1b, chest camera, left lens, frames 0-149 (10 s at 15 fps).
   Changes: frames joined into a video, scaled from 2208x1242 to 1280x720, normalised to 10 fps, faces blurred again by
-  our server (the dataset already blurs faces and plates). The camera height (1.16 m) and tilt (12.1 deg down) used for
+  our server (the dataset already blurs faces and plates), measurement overlays drawn by the app. The camera height (1.16 m) and tilt (12.1 deg down) used for
   this run come from the dataset's own stereo depth maps (a ground-plane fit; height from frames 300-450 of the same
   session, tilt and roll averaged over frames 0-149). The depth maps are themselves estimates (CREStereo), not survey
-  measurements.
+  measurements. Method and the stereo cross-check: docs/sanpo-check.md.
 
 The .json next to each clip is the response of a live analyze run on it (2026-10-29, Muse Spark 1.3 + SAM 3.1).
