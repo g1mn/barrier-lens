@@ -1,6 +1,8 @@
 Two clips are the first 10 s of Pexels videos (Pexels License: free to use and modify), normalised to 10 fps and
 1280x720 (or 720x1280), faces blurred on our server (OpenCV YuNet) before any model saw them. Licence plates are not
 detected automatically (no plate detector); none are readable in these clips at this size (checked by eye 10-29).
+The scooter operator's brand marks (JET in scooters-city-live.mp4, BIRD in the live-run clip below) are blurred by us
+(fixed boxes, ffmpeg gblur, 2026-10-30), so no third-party mark is shown; the recorded runs were made before the blur.
 
 scooters-city-live.mp4 — "Urban Electric Scooters Parked in Cityscape" by FABIO REIS DE ABREU (PORTUGA),
   https://www.pexels.com/video/urban-electric-scooters-parked-in-cityscape-36383602/
