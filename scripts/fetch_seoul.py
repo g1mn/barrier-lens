@@ -5,12 +5,12 @@ Sources (Korea Open Government License Type 1 / 공공누리 1유형, see data/s
   SeoulMetroFaciInfo OA-15994  live elevator / escalator status, Seoul Metro stations
   tbTraficElvtr      OA-21212  elevator positions around subway stations (WGS84, 2020 data)
   tbTraficEntrcLft   OA-21211  wheelchair lift positions at station entrances (WGS84, 2020 data)
-Geocoding goes through the VWorld address API, one request at a time, 1.5 s apart, and every
-answer is appended to a cache file the moment it arrives (VWorld blocks a key after ~10k calls/day).
+Geocoding goes through the VWorld address API during "build" only, one request at a time,
+1.5 s apart, and only in memory: VWorld results must be used in real time and must not be stored,
+so just the 300 / 500 / 1000 m distance band of each address is written to disk.
 
-Steps (run in this order; each one resumes from its cache):
+Steps (run in this order; towing resumes from its cache):
   .venv/bin/python scripts/fetch_seoul.py towing           page the whole towing table once, keep Seocho-gu + Gangnam-gu
-  .venv/bin/python scripts/fetch_seoul.py geocode [--max N] geocode addresses in the target dongs
   .venv/bin/python scripts/fetch_seoul.py station          Yangjae elevators, lifts and live status
   .venv/bin/python scripts/fetch_seoul.py exits            exit / elevator positions from OpenStreetMap (one Overpass call)
   .venv/bin/python scripts/fetch_seoul.py build            write data/seoul/towing-yangjae.json
@@ -38,7 +38,6 @@ SEOUL_DIR = ROOT / "data" / "seoul"          # small, committed
 CACHE_DIR = ROOT / "data" / "cache" / "seoul"  # large, gitignored
 TOW_ROWS = CACHE_DIR / "towing-rows.jsonl"
 TOW_PROGRESS = CACHE_DIR / "towing-progress.jsonl"
-GEOCODE_CACHE = SEOUL_DIR / "geocode-vworld.jsonl"
 TOW_OUT = SEOUL_DIR / "towing-yangjae.json"
 STATION_OUT = SEOUL_DIR / "yangjae-station.json"
 
@@ -51,6 +50,7 @@ KEEP_GU = {"서초구", "강남구"}
 # 1 km (도곡동, 서초동, 개포동) are deliberately left out to keep VWorld calls low.
 TARGET_DONGS = ("서울특별시 서초구 양재동",)
 BUILD_RADIUS_M = 1000
+BANDS_M = (300, 500, 1000)  # written per address; anything beyond BUILD_RADIUS_M is dropped
 VWORLD_GAP_S = 1.5
 
 
@@ -156,17 +156,7 @@ def in_target(addr: str) -> bool:
     return any(addr.startswith(p + " ") for p in TARGET_DONGS)
 
 
-# ---------------------------------------------------------------- VWorld geocoding
-
-def load_geocode_cache() -> dict[str, dict]:
-    out: dict[str, dict] = {}
-    if GEOCODE_CACHE.exists():
-        for line in GEOCODE_CACHE.read_text().splitlines():
-            if line.strip():
-                g = json.loads(line)
-                out[g["addr"]] = g
-    return out
-
+# ---------------------------------------------------------------- VWorld geocoding (in memory only; never written to disk)
 
 def vworld_geocode(client: httpx.Client, addr: str, kind: str) -> dict:
     k = key("VWORLD_API_KEY")
@@ -187,50 +177,6 @@ def vworld_geocode(client: httpx.Client, addr: str, kind: str) -> dict:
         return {"status": "NOT_FOUND"}
     err = resp.get("error") or {}
     raise RuntimeError(f"vworld status={status} code={err.get('code')} {err.get('text')}")
-
-
-def cmd_geocode(args: argparse.Namespace) -> None:
-    rows = [r for r in load_tow_rows() if in_target(r["ADDR"])]
-    freq = collections.Counter(r["ADDR"].strip() for r in rows)
-    cache = load_geocode_cache()
-    todo = [a for a, _ in freq.most_common() if a not in cache]
-    log(f"geocode: {len(freq)} unique addresses in target dongs, {len(cache)} cached, {len(todo)} to do,"
-        f" this run max {args.max}")
-    calls, fails_in_row = 0, 0
-    with httpx.Client() as client, GEOCODE_CACHE.open("a") as f:
-        for addr in todo[: args.max]:
-            if calls + 2 > args.max_calls:
-                log(f"  stopping at the call budget ({calls} calls, --max-calls {args.max_calls})")
-                break
-            result = None
-            for kind in ("parcel", "road"):
-                try:
-                    calls += 1
-                    g = vworld_geocode(client, addr, kind)
-                    fails_in_row = 0
-                except Exception as e:  # noqa: BLE001
-                    fails_in_row += 1
-                    log(f"  vworld error ({fails_in_row} in a row) for {addr}: {redact(repr(e))[:160]}")
-                    if fails_in_row >= 6:
-                        log(f"  stopping: 6 failures in a row after {calls} calls; rerun later (cache keeps progress)")
-                        return
-                    time.sleep(VWORLD_GAP_S * 4)
-                    g = None
-                time.sleep(VWORLD_GAP_S)
-                if g and g["status"] == "OK":
-                    result = {"addr": addr, "type": kind, **g}
-                    break
-                if g is None:
-                    break  # transport error: do not cache, retry next run
-            if result is None and g is not None:
-                result = {"addr": addr, "status": "NOT_FOUND"}
-            if result:
-                result["at"] = now_iso()
-                f.write(json.dumps(result, ensure_ascii=False) + "\n")
-                f.flush()
-            if calls % 50 == 0:
-                log(f"  {calls} vworld calls so far")
-    log(f"geocode: done, {calls} vworld calls this run")
 
 
 # ---------------------------------------------------------------- station accessibility
@@ -343,37 +289,60 @@ def kind_of(t: str) -> str:
 def cmd_build(_args: argparse.Namespace) -> None:
     station = json.loads(STATION_OUT.read_text())
     c = station["centre"]
-    cache = load_geocode_cache()
     rows = [r for r in load_tow_rows() if in_target(r["ADDR"])]
+    freq = collections.Counter(r["ADDR"].strip() for r in rows)
+    # VWorld answers stay in memory: each distinct address is geocoded once, only its band is kept.
+    bands: dict[str, int] = {}
+    not_found, beyond, calls, fails_in_row = 0, 0, 0, 0
+    with httpx.Client() as client:
+        for addr in [a for a, _ in freq.most_common()]:
+            g = None
+            for kind in ("parcel", "road"):
+                try:
+                    calls += 1
+                    g = vworld_geocode(client, addr, kind)
+                    fails_in_row = 0
+                except Exception as e:  # noqa: BLE001
+                    fails_in_row += 1
+                    log(f"  vworld error ({fails_in_row} in a row) for {addr}: {redact(repr(e))[:160]}")
+                    if fails_in_row >= 6:
+                        log(f"  stopping: 6 failures in a row after {calls} calls; rerun later")
+                        return
+                    time.sleep(VWORLD_GAP_S * 4)
+                    g = None
+                time.sleep(VWORLD_GAP_S)
+                if g and g["status"] == "OK":
+                    break
+                if g is None:
+                    break  # transport error: leave it out of this build
+            if g is None:
+                continue
+            if g["status"] == "NOT_FOUND":
+                not_found += 1
+                continue
+            band = next((b for b in BANDS_M if haversine_m(c["lat"], c["lon"], g["lat"], g["lon"]) <= b), None)
+            if band is None:
+                beyond += 1
+            else:
+                bands[addr] = band
+            if calls % 50 == 0:
+                log(f"  {calls} vworld calls so far")
+    log(f"build: geocoded {len(freq)} addresses with {calls} vworld calls")
     groups: dict[str, list[dict]] = collections.defaultdict(list)
-    missing = 0
     for r in rows:
-        g = cache.get(r["ADDR"].strip())
-        if not g:
-            missing += 1
-            continue
-        if g["status"] != "OK":
-            continue
-        groups[r["ADDR"].strip()].append(r)
+        if r["ADDR"].strip() in bands:
+            groups[r["ADDR"].strip()].append(r)
     points = []
     for addr, rs in groups.items():
-        g = cache[addr]
-        d = haversine_m(c["lat"], c["lon"], g["lat"], g["lon"])
-        if d > BUILD_RADIUS_M:
-            continue
         dates = sorted(r["DCLR_DT"] for r in rs)
         points.append({
-            "address": addr, "lat": g["lat"], "lon": g["lon"], "geocode": g["type"],
+            "address": addr, "band_m": bands[addr],
             "count": len(rs), "first": dates[0], "last": dates[-1],
             "by_year": dict(sorted(collections.Counter(x[:4] for x in dates).items())),
             "kinds": dict(collections.Counter(kind_of(r["TYPE"]) for r in rs).most_common()),
-            "dist_m": round(d),
         })
-    points.sort(key=lambda p: (-p["count"], p["dist_m"]))
+    points.sort(key=lambda p: (-p["count"], p["address"]))
     all_dates = sorted(d for p in points for d in (p["first"], p["last"]))
-    not_found = sorted({a for a in (r["ADDR"].strip() for r in rows) if cache.get(a, {}).get("status") == "NOT_FOUND"})
-    distinct = {r["ADDR"].strip() for r in rows}
-    geocoded_ok = {a for a in distinct if cache.get(a, {}).get("status") == "OK"}
     out = {
         "what": "E-scooter towing records (OA-23057) in 양재동 (양재1동 + 양재2동) within 1 km of Yangjae Station,"
                 " grouped by lot address",
@@ -388,26 +357,29 @@ def cmd_build(_args: argparse.Namespace) -> None:
             "rows_in_dongs": len(rows),
             "rows_in_dongs_date_range": ([min(r["DCLR_DT"] for r in rows), max(r["DCLR_DT"] for r in rows)]
                                          if rows else None),
-            "distinct_addresses": len(distinct),
-            "addresses_geocoded": len(geocoded_ok),
-            "rows_geocoded": sum(1 for r in rows if r["ADDR"].strip() in geocoded_ok),
-            "rows_without_geocode_yet": missing,
-            "addresses_not_found": len(not_found),
+            "distinct_addresses": len(freq),
+            "addresses_banded": len(bands),
+            "rows_banded": sum(1 for r in rows if r["ADDR"].strip() in bands),
+            "addresses_not_found": not_found,
+            "addresses_beyond_1km": beyond,
         },
         "caveats": [
-            "Coordinates are VWorld parcel (lot) centroids, not the spot where the scooter stood: expect tens of metres of error.",
+            "Addresses are placed in 300 / 500 / 1000 m bands from the station by geocoding each lot address"
+            " with VWorld at build time; no coordinates are stored (VWorld results may not be stored).",
             "Records are past towing reports (DCLR_DT = report date), not current obstacles.",
             "Districts changed how they log towing over the years; compare years inside one district only.",
             "Only 양재동 (the legal dong of 양재1동 and 양재2동) is geocoded. Parts of the 1 km circle in 도곡동,"
             " 서초동 and 개포동 have towing too but are not in this file.",
             "Some report kinds are the reporter's own free text; those are counted as 기타(신고자 자유 기재).",
         ],
-        "source": "Seoul Open Data Plaza OA-23057 (aiTbAutoKickboard), KOGL Type 1; geocoded with VWorld",
+        "source": "Seoul Open Data Plaza OA-23057 (aiTbAutoKickboard), KOGL Type 1;"
+                  " distance bands from VWorld geocoding at build time (not stored)",
         "data": points,
     }
     TOW_OUT.write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n")
     log(f"build: {out['records']} records at {out['points']} addresses within {BUILD_RADIUS_M} m,"
-        f" dates {out['date_range']}, rows still without geocode: {missing} -> {TOW_OUT.relative_to(ROOT)}")
+        f" dates {out['date_range']}, not found: {not_found}, beyond 1 km: {beyond}"
+        f" -> {TOW_OUT.relative_to(ROOT)}")
 
 
 def cmd_stats(_args: argparse.Namespace) -> None:
@@ -424,24 +396,18 @@ def cmd_stats(_args: argparse.Namespace) -> None:
     for p in TARGET_DONGS:
         rs = [r for r in rows if r["ADDR"].startswith(p + " ")]
         log(f"  {p}: rows={len(rs)} unique addresses={len({r['ADDR'].strip() for r in rs})}")
-    cache = load_geocode_cache()
-    log(f"geocode cache: {len(cache)} ({collections.Counter(g['status'] for g in cache.values())})")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("towing")
-    g = sub.add_parser("geocode")
-    g.add_argument("--max", type=int, default=600, help="max addresses this run")
-    g.add_argument("--max-calls", type=int, default=700,
-                   help="max VWorld requests this run (an address can take 2: parcel, then road)")
     sub.add_parser("station")
     sub.add_parser("exits")
     sub.add_parser("build")
     sub.add_parser("stats")
     args = ap.parse_args()
-    {"towing": cmd_towing, "geocode": cmd_geocode, "station": cmd_station, "exits": cmd_exits,
+    {"towing": cmd_towing, "station": cmd_station, "exits": cmd_exits,
      "build": cmd_build, "stats": cmd_stats}[args.cmd](args)
 
 

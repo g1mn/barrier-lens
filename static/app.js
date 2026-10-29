@@ -60,7 +60,6 @@
   const exitLayer = L.layerGroup().addTo(map);
   const pinLayer = L.layerGroup().addTo(map);
   let ring = null;
-  const towMarkers = new Map();
 
   // ------------------------------------------------------------------ layout: bar height, sheet, crosshair
   const sheet = $('#sheet');
@@ -132,20 +131,11 @@
       return;
     }
     towLayer.clearLayers();
-    towMarkers.clear();
     if (ring) ring.remove();
     ring = L.circle(YANGJAE, { radius: r, color: '#111', weight: 2, dashArray: '6 6', fill: false, interactive: false }).addTo(map);
 
+    // no per-address coordinates are stored, so only the ring is drawn
     const pts = d.points || [];
-    // big circles first so small ones stay clickable on top
-    [...pts].sort((a, b) => b.count - a.count).forEach((p) => {
-      const radius = Math.min(22, 4 + 2.4 * Math.sqrt(p.count));
-      const m = L.circleMarker([p.lat, p.lon], {
-        radius, color: getCss('--tow-stroke'), weight: 1.5, fillColor: getCss('--tow'), fillOpacity: 0.78,
-      }).bindPopup(towPopup(p), { maxWidth: 280 });
-      m.addTo(towLayer);
-      towMarkers.set(p.addr, m);
-    });
 
     const cov = d.coverage || {};
     if (!pts.length) {
@@ -162,13 +152,8 @@
     list.innerHTML = '';
     [...pts].sort((a, b) => b.count - a.count).slice(0, 5).forEach((p) => {
       const li = document.createElement('li');
-      li.innerHTML = `<button type="button"><span class="dot" aria-hidden="true"></span>
-        <span class="addr" lang="ko">${esc(shortAddr(p.addr))}<span class="meta" lang="en">${p.dist_m} m from the station · last ${monthLabel(p.last)}</span></span>
-        <span class="n">${p.count}<span class="visually-hidden"> reports</span></span></button>`;
-      li.querySelector('button').addEventListener('click', () => {
-        centreOn(L.latLng(p.lat, p.lon), 18);
-        towMarkers.get(p.addr)?.openPopup();
-      });
+      li.innerHTML = `<span class="addr" lang="ko">${esc(shortAddr(p.addr))}<span class="meta" lang="en">within ${p.band_m} m of the station · last ${monthLabel(p.last)}</span></span>
+        <span class="n">${p.count}<span class="visually-hidden"> reports</span></span>`;
       list.appendChild(li);
     });
 
@@ -181,16 +166,6 @@
     });
   }
   function shortAddr(a) { return a.replace(/^서울특별시\s+/, ''); }
-  function towPopup(p) {
-    const types = Object.entries(p.types_en || {}).slice(0, 3)
-      .map(([t, n]) => `<li>${esc(t)} — ${n}</li>`).join('');
-    return `<h4>${p.count} towing report${p.count === 1 ? '' : 's'}</h4>
-      <p class="ko" lang="ko">${esc(p.addr)}</p>
-      <p>${monthLabel(p.first)} – ${monthLabel(p.last)} · ${p.dist_m} m from the station</p>
-      <ul>${types}</ul>
-      <p class="ko">Position is the lot centre, not the exact spot.</p>`;
-  }
-  function getCss(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
 
   document.querySelectorAll('input[name="radius"]').forEach((el) => {
     el.addEventListener('change', () => { if (el.checked) loadTowing(Number(el.value)); });

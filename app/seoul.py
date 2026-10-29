@@ -7,7 +7,6 @@ Seoul Open Data (OA-15994) at most once every 10 minutes and falls back to the c
 from __future__ import annotations
 
 import json
-import math
 import time
 from functools import lru_cache
 from pathlib import Path
@@ -52,14 +51,6 @@ TYPE_EN = {
 }
 
 
-def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    r = 6371008.8
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp, dl = p2 - p1, math.radians(lon2 - lon1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return 2 * r * math.asin(math.sqrt(a))
-
-
 @lru_cache(maxsize=1)
 def _towing() -> dict:
     if not TOWING_FILE.exists():
@@ -74,28 +65,27 @@ def towing_meta() -> dict:
 
 
 def towing_near(lat: float, lon: float, radius_m: float) -> list[dict]:
-    """Towing records grouped by lot address within radius_m of (lat, lon), nearest first.
+    """Towing records grouped by lot address with band_m <= radius_m, most reports first.
 
-    Each item: address, lat, lon, count, first, last (report dates YYYY-MM-DD), kinds ({kind: n},
-    Korean form categories), plus by_year, kinds_en, dist_m, and addr / types_en (aliases kept for
+    Each item: address, band_m, count, first, last (report dates YYYY-MM-DD), kinds ({kind: n},
+    Korean form categories), plus by_year, kinds_en, and addr / types_en (aliases kept for
     static/app.js). Reads data/seoul/towing-yangjae.json only; never calls VWorld or Seoul Open Data.
-    Only 양재동 within 1 km of Yangjae Station is cached: an empty list outside it means "not cached",
-    not "no towing".
+    lat/lon are ignored: the cache only covers Yangjae Station. Only 양재동 within 1 km of Yangjae
+    Station is cached: an empty list outside it means "not cached", not "no towing".
     """
     out = []
     for p in _towing().get("data", []):
-        d = haversine_m(lat, lon, p["lat"], p["lon"])
-        if d > radius_m:
+        if p["band_m"] > radius_m:
             continue
         kinds = p.get("kinds", {})
         kinds_en = {TYPE_EN.get(t, t): n for t, n in kinds.items()}
         out.append({
-            "address": p["address"], "lat": p["lat"], "lon": p["lon"], "count": p["count"],
+            "address": p["address"], "band_m": p["band_m"], "count": p["count"],
             "first": p["first"], "last": p["last"], "kinds": kinds,
-            "by_year": p.get("by_year", {}), "kinds_en": kinds_en, "dist_m": round(d),
+            "by_year": p.get("by_year", {}), "kinds_en": kinds_en,
             "addr": p["address"], "types_en": kinds_en,
         })
-    out.sort(key=lambda p: (p["dist_m"], -p["count"]))
+    out.sort(key=lambda p: (-p["count"], p["address"]))
     return out
 
 

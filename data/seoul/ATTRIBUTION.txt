@@ -5,12 +5,10 @@ towing-yangjae.json
   Licence: Korea Open Government License Type 1 (공공누리 제1유형: 출처표시).
   Source: 서울특별시, https://data.seoul.go.kr/dataList/OA-23057/S/1/datasetView.do
   Changes: kept rows whose address is in 서울특별시 서초구 양재동, grouped by lot address, counted by
-  report date and form category (free-text categories folded into one bucket), positions added by
-  geocoding the lot address with the VWorld address API (국토교통부 브이월드, api.vworld.kr).
-
-geocode-vworld.jsonl
-  VWorld address API answers (parcel centroid, EPSG:4326) for the addresses above, one line per address.
-  Provider: 국토교통부 공간정보 오픈플랫폼 브이월드.
+  report date and form category (free-text categories folded into one bucket), and placed in 300 / 500 /
+  1000 m distance bands from the centre by geocoding each lot address with the VWorld address API
+  (국토교통부 브이월드, api.vworld.kr) at build time. VWorld results must be used in real time and may not be
+  stored, so no coordinates are kept: only the band.
 
 yangjae-station.json
   Seoul Open Data Plaza OA-15994 (SeoulMetroFaciInfo), OA-21212 (tbTraficElvtr),
