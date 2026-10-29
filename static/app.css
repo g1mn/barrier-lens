@@ -140,7 +140,7 @@ button, input, select { font: inherit; color: inherit; }
   border-radius: 18px 18px 0 0; border-top: 1px solid var(--line);
   box-shadow: var(--shadow);
   padding: 0 16px calc(12px + env(safe-area-inset-bottom));
-  transition: max-height .25s ease;
+  transition: max-height .25s ease, translate .6s cubic-bezier(.2, .8, .2, 1);
 }
 .sheet[data-state="peek"] .sheet-body { display: none; }
 .sheet[data-state="open"] { height: calc(100dvh - var(--bar-h, 60px) - 12px); }
@@ -365,42 +365,118 @@ input[type="file"]::file-selector-button {
   .tour-card { transition: none; }
 }
 
-/* ---------- opening "Where is this?" intro ---------- */
+/* ---------- opening intro: globe dive, the map's data, then one recorded check ---------- */
+/* The overlay keeps one look in both themes (dark glass over the globe and the map); only the globe's own
+   colours follow the theme. Every part starts hidden; app.js sets opacity and transform from one clock. */
 :root {
   --globe-ocean: #17263f;
   --globe-land: #9aa3b2;
-  --globe-grat: rgb(255 255 255 / .16);
-  --globe-rim: rgb(255 255 255 / .28);
+  --globe-grat: rgba(255, 255, 255, .16);
+  --space-0: #15243f;
+  --space-1: #04060b;
+  --iv-glass: rgb(12 14 19 / .74);
 }
 :root[data-theme="light"] {
   --globe-ocean: #b9d4ec;
   --globe-land: #75808f;
-  --globe-grat: rgb(15 17 21 / .14);
-  --globe-rim: rgb(15 17 21 / .22);
+  --globe-grat: rgba(15, 17, 21, .14);
+  --space-0: #f1f5fa;
+  --space-1: #c4d2e3;
 }
-#intro {
-  position: fixed; left: 0; right: 0; top: var(--bar-h, 60px); bottom: 0; z-index: 950;
-  background: var(--bg); overflow: hidden;
-  opacity: 1; transition: opacity .6s ease;
+#intro { position: fixed; left: 0; right: 0; top: var(--bar-h, 60px); bottom: 0; z-index: 1100; overflow: hidden; cursor: pointer; }
+#intro-globe { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 46%, var(--space-0) 0%, var(--space-1) 74%); }
+#intro-fx, #iv-fx { position: absolute; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; }
+#intro .iv-crumbs, #intro .iv-cam, #intro .iv-mapcredit, #intro .iv-head { opacity: 0; }
+.intro-skip { position: absolute; top: 12px; right: max(12px, env(safe-area-inset-right)); z-index: 3; }
+
+.iv-heads { position: absolute; left: 16px; right: 16px; top: 64px; pointer-events: none; }  /* below Skip on phones */
+.iv-head {
+  position: absolute; left: 0; top: 0; width: 100%; box-sizing: border-box; padding: 14px 16px 16px;
+  border-radius: 16px; background: var(--iv-glass); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  border: 1px solid rgb(255 255 255 / .1); will-change: opacity, transform;
 }
-#intro.fading { opacity: 0; pointer-events: none; }
-#intro-globe { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.intro-skip { position: absolute; top: 10px; right: 10px; z-index: 2; }
-#intro-cap {
-  position: fixed; z-index: 960; top: calc(var(--bar-h, 60px) + 10px); left: 12px; right: 12px;
-  margin: 0 auto; max-width: 430px; pointer-events: none;
-  display: flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 9px 14px; border-radius: 999px; text-align: center;
-  background: var(--surface); color: var(--text);
-  border: 1px solid var(--line); box-shadow: var(--shadow);
-  font-weight: 650; font-size: .95rem;
-  opacity: 1; transition: opacity .6s ease;
+.iv-kicker { margin: 0 0 6px; font: 750 .74rem/1.25 var(--font); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.iv-title { margin: 0; font: 800 clamp(1.3rem, 5vw, 2rem)/1.15 var(--font); color: #fff; word-break: keep-all; overflow-wrap: break-word; }
+.iv-title b { color: var(--accent); font-variant-numeric: tabular-nums; }
+.iv-sub { margin: 8px 0 0; font: 500 clamp(.88rem, 2.4vw, 1rem)/1.45 var(--font); color: rgb(255 255 255 / .82); word-break: keep-all; }
+@media (min-width: 900px) {
+  .iv-heads { left: 32px; right: auto; top: 28px; width: 384px; }
+  .iv-sub { font-size: 1.02rem; }
 }
-#intro-cap.fading { opacity: 0; }
-#intro-cap .intro-dot {
-  width: 10px; height: 10px; flex: none; border-radius: 50%;
-  background: var(--accent); border: 2px solid var(--accent-ink);
+
+.iv-crumbs {
+  position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); box-sizing: border-box;
+  width: max-content; max-width: calc(100% - 32px); padding: 9px 16px 8px; border-radius: 18px; text-align: center;
+  background: var(--iv-glass); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  border: 1px solid rgb(255 255 255 / .1); pointer-events: none;
 }
+.iv-crumbs ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; row-gap: 2px; }
+.iv-crumbs li { font: 650 .95rem/1.35 var(--font); color: rgb(255 255 255 / .62); white-space: nowrap; transition: color .2s; }
+.iv-crumbs li + li::before { content: "\203A"; margin: 0 .55em; color: rgb(255 255 255 / .35); }
+.iv-crumbs li.on { color: var(--accent); }
+.iv-coords { margin: 4px 0 0; font: 600 .78rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; color: rgb(255 255 255 / .7); letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+.iv-mapcredit { position: absolute; right: 8px; bottom: 6px; margin: 0; padding: 4px 8px; border-radius: 8px; font: 500 .7rem/1 var(--font); color: rgb(255 255 255 / .8); background: var(--iv-glass); pointer-events: none; }
+
+.iv-cam { position: absolute; margin: 0; left: 16px; top: 0; width: 640px; will-change: opacity, transform; pointer-events: none; }
+.iv-screen {
+  position: relative; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; background: #000;
+  box-shadow: 0 24px 60px rgb(0 0 0 / .55), 0 0 0 1px rgb(255 255 255 / .16);
+}
+.iv-zoom { position: absolute; inset: 0; will-change: transform; }
+.iv-zoom video, .iv-zoom img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+#iv-still { opacity: 0; }
+.iv-flash { position: absolute; inset: 0; background: #fff; opacity: 0; }
+.iv-hud {
+  position: absolute; left: 12px; bottom: 10px; margin: 0; display: flex; gap: 10px; align-items: center;
+  font: 650 .72rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; color: #fff;
+  text-shadow: 0 1px 4px rgb(0 0 0 / .85);
+}
+.iv-rec::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%;
+  background: #ff4d4d; animation: iv-blink 1s steps(2, start) infinite;
+}
+@keyframes iv-blink { to { visibility: hidden; } }
+.iv-tags { position: absolute; left: 12px; top: 12px; margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; justify-items: start; }
+.iv-tags li {
+  padding: 5px 11px; border-radius: 999px; font: 650 .8rem/1.2 var(--font); white-space: nowrap; opacity: 0;
+  background: rgb(12 14 19 / .8); color: #fff; border: 1px solid rgb(255 255 255 / .2);
+}
+.iv-tags li[data-k="spark"] { border-color: var(--accent); }
+.iv-tags li b { color: var(--accent); }
+.iv-verdict {
+  position: absolute; right: 12px; top: 12px; margin: 0; display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px 8px 9px; border-radius: 14px; opacity: 0; transform-origin: 100% 0;
+  background: var(--ok-bg); color: var(--ok); border: 2px solid var(--ok); font: 800 1.15rem/1 var(--font);
+  box-shadow: 0 10px 30px rgb(0 0 0 / .45);
+}
+.iv-verdict svg { width: 26px; height: 26px; fill: currentColor; stroke: var(--ok-bg); }
+.iv-verdict span { color: var(--text); font-weight: 750; font-variant-numeric: tabular-nums; }
+.iv-rail { list-style: none; margin: 12px 0 0; padding: 0; display: flex; gap: 6px; }
+.iv-rail li {
+  flex: 1 1 0; min-width: 0; min-height: 2.9em; box-sizing: border-box; padding: 5px 6px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; text-align: center; word-break: keep-all;
+  font: 650 .74rem/1.2 var(--font); color: rgb(255 255 255 / .55);
+  background: rgb(12 14 19 / .74); border: 1px solid rgb(255 255 255 / .12);
+}
+.iv-rail .iv-short { display: none; }
+@media (max-width: 600px) { .iv-rail .iv-long { display: none; } .iv-rail .iv-short { display: inline; } }
+.iv-rail li[data-state="run"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.iv-rail li[data-state="done"] { color: #fff; border-color: rgb(61 220 132 / .75); }
+.iv-rail li[data-state="done"]::before { content: "\2713"; margin-right: .35em; color: #3ddc84; }
+.iv-say { margin: 12px 0 0; min-height: 2.9em; font: 650 clamp(.95rem, 2.3vw, 1.1rem)/1.45 var(--font); color: #fff; text-shadow: 0 1px 10px rgb(0 0 0 / .75); }
+.iv-say cite { font-style: normal; font-weight: 750; color: var(--accent); white-space: nowrap; }
+.iv-credit { margin: 4px 0 0; font: 500 .72rem/1.35 var(--font); color: rgb(255 255 255 / .72); text-shadow: 0 1px 6px rgb(0 0 0 / .75); }
+
+/* while the intro runs, the page's own panel waits off screen and the map's ring is hidden;
+   both come back as the intro hands over (the exit markers pop up during the intro, set by app.js) */
+.intro-on .sheet { translate: 0 calc(100% + 24px); }
+@media (min-width: 900px) { .intro-on .sheet { translate: calc(-100% - 40px) 0; } }
+.leaflet-overlay-pane { transition: opacity .5s ease; }
+.intro-on .leaflet-overlay-pane, .intro-on .exit-pin { opacity: 0; }
+
+/* reduced motion: only the location line, still */
+#intro.static .iv-crumbs { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
-  #intro, #intro-cap { transition: none; }
+  .leaflet-overlay-pane { transition: none; }
+  .iv-rec::before { animation: none; }
 }

@@ -20,4 +20,10 @@ sanpo-corridor-live.mp4 — from the SANPO dataset by Google Research, CC BY 4.0
   session, tilt and roll averaged over frames 0-149). The depth maps are themselves estimates (CREStereo), not survey
   measurements. Method and the stereo cross-check: docs/sanpo-check.md.
 
+intro-corridor.mp4, intro-corridor-77.jpg — the opening intro only, from the same SANPO session (CC BY 4.0).
+  The clip is source frames 71-116 (the 3 s that end on the measured frame), scaled to 1280x720, faces blurred by our
+  server (OpenCV YuNet), interpolated from 15 to 30 fps (ffmpeg minterpolate). The still is frame 77 of
+  sanpo-corridor-live.mp4, the frame the recorded run measured. intro-corridor.json holds fields copied from
+  sanpo-corridor-live.json by scripts/build_intro.py (outlines, gap, band, verdict, explanation).
+
 The .json next to each clip is the response of a live analyze run on it (2026-10-29, Muse Spark 1.3 + SAM 3.1).

@@ -10,6 +10,9 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
       integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw=="
       crossorigin="anonymous" referrerpolicy="no-referrer">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/5.24.0/maplibre-gl.min.css"
+      integrity="sha512-KIMsMWIdnoG9OwZa+oaIafmbDonqck1UCmq+/zcUi2aaZ97N9QE6TqpTM+n36EO40HGh64hU/375zxtjx7WTyQ=="
+      crossorigin="anonymous" referrerpolicy="no-referrer">
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
@@ -34,11 +37,39 @@
   <div class="crosshair" id="crosshair" hidden aria-hidden="true"><span></span></div>
 
   <div id="intro" hidden>
-    <canvas id="intro-globe" aria-hidden="true"></canvas>
+    <div id="intro-globe" aria-hidden="true"></div>
+    <canvas id="intro-fx" aria-hidden="true"></canvas>
+    <div class="iv-heads" id="iv-heads" aria-hidden="true"></div>
+    <div class="iv-crumbs" id="iv-crumbs" aria-hidden="true">
+      <ol><li>Earth</li><li>East Asia</li><li>South Korea</li><li>Seoul</li><li>Gwanghwamun Gate</li></ol>
+      <p class="iv-coords" id="iv-coords"></p>
+    </div>
+    <figure class="iv-cam" id="iv-cam" aria-hidden="true">
+      <div class="iv-screen" id="iv-screen">
+        <div class="iv-zoom" id="iv-zoom">
+          <video id="iv-video" muted playsinline preload="none"></video>
+          <img id="iv-still" alt="">
+          <canvas id="iv-fx"></canvas>
+        </div>
+        <div class="iv-flash" id="iv-flash"></div>
+        <ul class="iv-tags" id="iv-tags"></ul>
+        <p class="iv-hud"><span class="iv-rec">REC</span><span id="iv-hud-cam"></span></p>
+        <p class="iv-verdict" id="iv-verdict"><svg aria-hidden="true"><use href="#v-passes"/></svg><b>Passes</b><span id="iv-verdict-cm"></span></p>
+      </div>
+      <ol class="iv-rail" id="iv-rail">
+        <li><span class="iv-long">Blur faces</span><span class="iv-short">Blur</span></li>
+        <li><span class="iv-long">Muse Spark reads</span><span class="iv-short">Spark</span></li>
+        <li><span class="iv-long">SAM 3.1 outlines</span><span class="iv-short">SAM 3.1</span></li>
+        <li><span class="iv-long">Geometry measures</span><span class="iv-short">Measure</span></li>
+        <li><span class="iv-long">Muse Spark explains</span><span class="iv-short">Explain</span></li>
+      </ol>
+      <p class="iv-say" id="iv-say"></p>
+      <figcaption class="iv-credit">Sample clip: a New York sidewalk, from SANPO (Google Research, CC BY 4.0)</figcaption>
+    </figure>
+    <p class="iv-mapcredit" id="iv-mapcredit">&copy; OpenStreetMap contributors · Natural Earth · MapLibre</p>
     <button type="button" class="btn small intro-skip" id="intro-skip">Skip intro</button>
-    <p class="visually-hidden" role="status">Locating: Gwanghwamun Gate, Seoul, South Korea</p>
+    <p class="visually-hidden" role="status">Intro: where Gwanghwamun Gate is, in Seoul, South Korea, then one recorded check of a sidewalk.</p>
   </div>
-  <p id="intro-cap" hidden><span class="intro-dot" aria-hidden="true"></span><span id="intro-cap-text">East Asia</span></p>
 
   <section class="sheet" id="sheet" aria-labelledby="sheet-title" data-state="peek" tabindex="-1">
     <button type="button" class="sheet-handle" id="sheet-handle" aria-expanded="false" aria-controls="sheet-body">
@@ -236,7 +267,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
         integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g=="
         crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/5.24.0/maplibre-gl.min.js"
+        integrity="sha512-hoXlvOdSmh58mppUyZHZsscHkR/yXl6zLpTMTNwA6IZ61DpeaCNjosRu1WJ2DeIpkfW5MsJJ9H89zjV4IBGqRw=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
 <script defer src="/static/app.js"></script>
 </body>

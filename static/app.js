@@ -981,264 +981,536 @@
   }
   fillForm();
 
-  // ------------------------------------------------- opening "Where is this?" intro
-  // Earth -> East Asia -> South Korea -> Seoul -> Gwanghwamun Gate in ~6.5 s.
-  // Plays once per visit, never delays data loading, skips silently when d3,
-  // topojson or the vendor TopoJSON is missing. Skip: the button, Esc, or any
-  // tap on the overlay. #tour plays the intro first, #nointro never plays it.
+  // ------------------------------------------------- opening intro (~13 s)
+  // One clock drives everything: render(t) is a pure function of t, so ?intro_at=9.5 freezes any moment
+  // (add &go to play on from there). A MapLibre globe dives from space to Gwanghwamun Gate and lands on
+  // exactly the Leaflet view under it; the towing rings and station exits come up on the real map; then one
+  // recorded check plays in a viewfinder (blur -> Muse Spark -> SAM 3.1 -> geometry -> Muse Spark) and the
+  // page's own panel slides in. Once per visit; skip with the button, Esc or a tap. #tour plays it first,
+  // #nointro never. Without WebGL or MapLibre the globe is left out and the rest still plays.
   let introDone = Promise.resolve();
   let playIntroNow = () => Promise.resolve();
   {
-    const SEOUL_LONLAT = [126.9780, 37.5665];
     const FLAG = 'bl-intro-seen';
-    const GLOBE_CREDIT = 'Globe: Natural Earth';
     const overlay = $('#intro');
-    const canvas = $('#intro-globe');
-    const cap = $('#intro-cap');
-    const capText = $('#intro-cap-text');
     const skipBtn = $('#intro-skip');
+    const globeHost = $('#intro-globe');
+    const fx = $('#intro-fx');
+    const heads = $('#iv-heads');
+    const crumbs = $('#iv-crumbs');
+    const cam = $('#iv-cam');
+    const screen = $('#iv-screen');
+    const zoomBox = $('#iv-zoom');
+    const video = $('#iv-video');
+    const still = $('#iv-still');
+    const camFx = $('#iv-fx');
     const reduceMq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    let cancelPlay = null;  // set while the intro runs; skip paths call it
-
+    const AT = params.has('intro_at') ? Number(params.get('intro_at')) || 0 : null;
+    // Timeline in seconds. Stage i of the rail runs from RAIL[i] to RAIL[i + 1].
+    const T = {
+      dive: 3.8, swap: [3.8, 4.15],
+      rings: 4.0, ringDur: 1.0, ringGap: 0.22, exits: 4.75,
+      cam: 5.7, play: 5.95, blur: 6.1, spark: [7.35, 8.8], freeze: 8.95,
+      sam: [9.05, 10.1], measure: [10.1, 11.35], verdict: 11.35, explain: [11.6, 12.55],
+      handoff: 12.8, end: 13.4,
+    };
+    // zoom over the dive (seconds, zoom): the globe turns to East Asia, South Korea fills, Seoul, then a slow
+    // landing. A monotone cubic through these keys keeps the speed continuous; the centre follows the zoom
+    // along the van Wijk curve, so pan and zoom never stop and restart.
+    const ZKEYS = [[0, 0], [1.35, 2.6], [2.2, 5.4], [2.85, 9.8], [T.dive, 15]];  // first and last zoom set at start
+    const RAIL = [T.blur, T.spark[0], T.sam[0], T.measure[0], T.verdict, T.explain[1]];
+    const GATE = [CENTRE[1], CENTRE[0]];
+    const SEOUL = [126.9780, 37.5665];
+    const START = [8, 18];  // the globe opens on Europe and Africa and turns east
+    const clamp01 = (x) => Math.min(1, Math.max(0, x));
+    const seg = (t, a, b) => clamp01((t - a) / (b - a));
+    const fadeIO = (t, a, b, f = 0.3) => seg(t, a, a + f) * (1 - seg(t, b - f, b));
+    const inOut = (u) => (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
+    const outCubic = (u) => 1 - Math.pow(1 - u, 3);
+    const outBack = (u) => (u <= 0 ? 0 : 1 + 2.7 * Math.pow(u - 1, 3) + 1.7 * Math.pow(u - 1, 2));
+    const num = (n) => Math.round(n).toLocaleString('en');
+    const cssVar = (n) => (getComputedStyle(document.documentElement).getPropertyValue(n) || '').trim();
     const seen = () => { try { return sessionStorage.getItem(FLAG) === '1'; } catch { return false; } };
     const markSeen = () => { try { sessionStorage.setItem(FLAG, '1'); } catch { /* private mode */ } };
-    const cssVar = (n) => (getComputedStyle(document.documentElement).getPropertyValue(n) || '').trim();
-    const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
-    const lerp = (a, b, t) => a + (b - a) * t;
-    const creditOn = () => { try { map.attributionControl.addAttribution(GLOBE_CREDIT); } catch { /* no map */ } };
-    const creditOff = () => { try { map.attributionControl.removeAttribution(GLOBE_CREDIT); } catch { /* no map */ } };
-
-    function setCaption(t) { if (capText && capText.textContent !== t) capText.textContent = t; }
-    function showCap(t) { setCaption(t); if (cap) { cap.classList.remove('fading'); cap.hidden = false; } }
-    function hideCap() {
-      if (!cap || cap.hidden) return;
-      const kill = () => { cap.hidden = true; cap.classList.remove('fading'); };
-      cap.classList.add('fading');
-      if (reduceMq.matches) kill();
-      else setTimeout(kill, 650);
-    }
-    function blurSkip() { if (skipBtn && document.activeElement === skipBtn) skipBtn.blur(); }
-
-    // The page's normal state: Gwanghwamun Gate at zoom 16, adjusted for the sheet.
-    function finalMapState(fly) {
-      try {
-        if (fly && !reduceMq.matches) {
-          map.flyTo(CENTRE, 16, { duration: 1.4 });
-          map.once('moveend', () => { try { centreOn(L.latLng(CENTRE)); } catch { /* keep map */ } });
-        } else {
-          centreOn(L.latLng(CENTRE), 16);
-        }
-      } catch { /* keep whatever view the map has */ }
-    }
+    let cancelPlay = null;
 
     if (skipBtn) skipBtn.addEventListener('click', (e) => { e.stopPropagation(); if (cancelPlay) cancelPlay(); });
     if (overlay) overlay.addEventListener('click', () => { if (cancelPlay) cancelPlay(); });
-    document.addEventListener('keydown', (e) => {
-      if (cancelPlay && e.key === 'Escape') { e.preventDefault(); cancelPlay(); }
-    });
+    document.addEventListener('keydown', (e) => { if (cancelPlay && e.key === 'Escape') { e.preventDefault(); cancelPlay(); } });
 
-    // Reduced motion: no globe, no camera move. Final map plus a static chip for 3 s.
+    // Web Mercator world units (0..1) and back, and the van Wijk & Nuij zoom-and-pan curve (the one
+    // d3.interpolateZoom uses): p = [x, y, w], w = view width in world units, u in 0..1.
+    const mx = (lon) => (lon + 180) / 360;
+    const my = (lat) => (1 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / Math.PI) / 2;
+    const lonOf = (x) => x * 360 - 180;
+    const latOf = (y) => (360 / Math.PI) * Math.atan(Math.exp(Math.PI * (1 - 2 * y))) - 90;
+    function zoomPath(p0, p1, rho = 1.2) {
+      const [x0, y0, w0] = p0, [x1, y1, w1] = p1;
+      const dx = x1 - x0, dy = y1 - y0, d2 = dx * dx + dy * dy, r2 = rho * rho;
+      if (d2 < 1e-18) { const S = Math.log(w1 / w0); return (u) => [x0 + u * dx, y0 + u * dy, w0 * Math.exp(u * S)]; }
+      const d1 = Math.sqrt(d2);
+      const b0 = (w1 * w1 - w0 * w0 + r2 * r2 * d2) / (2 * w0 * r2 * d1);
+      const b1 = (w1 * w1 - w0 * w0 - r2 * r2 * d2) / (2 * w1 * r2 * d1);
+      const r0 = Math.log(Math.sqrt(b0 * b0 + 1) - b0), r1 = Math.log(Math.sqrt(b1 * b1 + 1) - b1);
+      const S = (r1 - r0) / rho, c0 = Math.cosh(r0);
+      return (u) => {
+        const s = rho * u * S + r0;
+        const k = (w0 / (r2 * d1)) * (c0 * Math.tanh(s) - Math.sinh(r0));
+        return [x0 + k * dx, y0 + k * dy, (w0 * c0) / Math.cosh(s)];
+      };
+    }
+
+    function makeGlobe(topo, start) {
+      if (!window.maplibregl || !window.topojson || !topo) return null;
+      let land, korea;
+      try {
+        land = window.topojson.feature(topo[0], topo[0].objects.land);
+        korea = window.topojson.feature(topo[1], topo[1].objects.countries).features
+          .find((f) => f.properties && f.properties.name === 'South Korea');
+      } catch { return null; }
+      const lines = [];
+      for (let lon = -180; lon < 180; lon += 15) lines.push(Array.from({ length: 81 }, (_, i) => [lon, -80 + i * 2]));
+      for (let lat = -75; lat <= 75; lat += 15) lines.push(Array.from({ length: 181 }, (_, i) => [-180 + i * 2, lat]));
+      const op = (z) => ['interpolate', ['linear'], ['zoom'], ...z];
+      try {
+        return new window.maplibregl.Map({
+          container: globeHost, interactive: false, attributionControl: false, fadeDuration: 0,
+          center: [start.lon, start.lat], zoom: start.zoom,
+          style: {
+            version: 8,
+            projection: { type: 'globe' },
+            sky: { 'atmosphere-blend': op([0, 1, 4, 1, 6.5, 0]) },
+            sources: {
+              land: { type: 'geojson', data: land },
+              korea: { type: 'geojson', data: korea || { type: 'FeatureCollection', features: [] } },
+              grat: { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates: lines } } },
+              // the same tiles as the Leaflet map, at the same scale (MapLibre zoom 15 = Leaflet zoom 16)
+              osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19 },
+            },
+            layers: [
+              { id: 'ocean', type: 'background', paint: { 'background-color': cssVar('--globe-ocean') } },
+              { id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': cssVar('--globe-land') } },
+              { id: 'grat', type: 'line', source: 'grat', maxzoom: 5, paint: { 'line-color': cssVar('--globe-grat'), 'line-width': 0.8 } },
+              { id: 'osm', type: 'raster', source: 'osm', minzoom: 4.5, paint: { 'raster-opacity': op([4.5, 0, 7, 1]) } },
+              { id: 'korea', type: 'fill', source: 'korea', maxzoom: 8, paint: { 'fill-color': cssVar('--accent'), 'fill-opacity': op([1.6, 0, 2.8, 0.9, 5.5, 0.85, 7.5, 0]) } },
+              { id: 'korea-edge', type: 'line', source: 'korea', maxzoom: 8, paint: { 'line-color': cssVar('--accent-ink'), 'line-width': 1, 'line-opacity': op([1.6, 0, 2.8, 0.5, 7.5, 0]) } },
+            ],
+          },
+        });
+      } catch { return null; }  // no WebGL
+    }
+
+    const getJson = (url) => fetch(url).then((r) => { if (!r.ok) throw new Error(url); return r.json(); });
+    const within = (p, ms) => Promise.race([p, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
+
+    async function loadTowing() {
+      const d = await getJson(`/api/towing?lat=${CENTRE[0]}&lon=${CENTRE[1]}&r=1000`);
+      const pts = d.points || [];
+      if (!pts.length) return null;
+      const by = (m) => pts.filter((p) => p.band_m <= m).reduce((n, p) => n + p.count, 0);
+      const first = pts.reduce((a, p) => (p.first < a ? p.first : a), pts[0].first);
+      const last = pts.reduce((a, p) => (p.last > a ? p.last : a), pts[0].last);
+      return { n300: by(300), n500: by(500), n1000: by(1000), span: `${monthLabel(first)} – ${monthLabel(last)}` };
+    }
+
+    function buildText(st) {
+      const d = st.d, tow = st.tow;
+      const H = [
+        [0.2, T.dive + 0.1, 'Barrier Lens', 'Does the chair fit past it?', 'A sidewalk check for wheelchair users, built on Meta models'],
+        tow
+          ? [T.rings + 0.05, T.cam - 0.05, 'Gwanghwamun · Seoul Open Data', `<b data-count="${tow.n1000}">0</b> e-scooter towing reports`,
+            `within 1 km of the gate: ${num(tow.n500)} within 500 m, ${num(tow.n300)} within 300 m<br>${esc(tow.span)}`]
+          : [T.rings + 0.05, T.cam - 0.05, 'Gwanghwamun Gate, Seoul, South Korea', 'Towing reports and station exits around the gate', ''],
+        [T.cam + 0.1, T.spark[0], 'Step 1 · film ten seconds', 'Can a wheelchair get past this?', 'Faces are blurred on our server before any model sees the clip.'],
+        [T.spark[0] + 0.05, T.verdict, 'Step 2 · Muse Spark 1.3 and SAM 3.1', 'Find the barriers, then measure the gap',
+          'Models find and outline; geometry measures. A model can only make the answer more cautious.'],
+        [T.verdict + 0.05, T.handoff, 'Step 3 · the answer, with its error', `Passes: about ${num(d.gap_cm)} cm`,
+          `95% band ${num(d.band_cm[0])}–${num(d.band_cm[1])} cm · a ${num(d.chair_cm)} cm chair needs ${num(d.needed_cm)} cm`],
+      ];
+      heads.innerHTML = H.map(([, , k, title, sub]) => `<div class="iv-head"><p class="iv-kicker">${esc(k)}</p><h2 class="iv-title">${title}</h2>${sub ? `<p class="iv-sub">${sub}</p>` : ''}</div>`).join('');
+      st.heads = H.map(([a, b], i) => ({ a, b, el: heads.children[i], count: heads.children[i].querySelector('[data-count]') }));
+      const tags = [[T.blur + 0.15, `<b>${num(d.blur.faces)}</b> faces blurred · YuNet`, 'blur'],
+        [T.spark[0] + 0.35, `Muse Spark: path <b>${esc(d.path)}</b>`, 'spark'],
+        ...d.barriers.map((b, i) => [T.spark[0] + 0.65 + 0.3 * i, esc(b), 'spark'])];
+      $('#iv-tags').innerHTML = tags.map(([, h, k]) => `<li data-k="${k}">${h}</li>`).join('');
+      st.tags = tags.map(([at], i) => ({ at, el: $('#iv-tags').children[i] }));
+      $('#iv-hud-cam').textContent = `camera ${d.camera.height_m.toFixed(2)} m · tilt ${Math.round(d.camera.pitch_deg)}° down`;
+      $('#iv-verdict-cm').textContent = `${num(d.gap_cm)} cm`;
+      st.rail = [...$('#iv-rail').children];
+      st.crumbs = [...crumbs.querySelectorAll('li')];
+      st.say = d.explanation;
+      // perimeter of each outline, for the tracing stroke
+      st.outlines = d.outlines.map((pts) => {
+        let len = 0;
+        for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; len += Math.hypot(b[0] - a[0], b[1] - a[1]); }
+        return { pts, len };
+      });
+      const [a, b] = d.gap_px;
+      zoomBox.style.transformOrigin = `${((a[0] + b[0]) / 2 / d.frame_size[0]) * 100}% ${((a[1] + b[1]) / 2 / d.frame_size[1]) * 100}%`;
+    }
+
+    function measure(st) {
+      const r = overlay.getBoundingClientRect();
+      st.W = r.width; st.H = r.height;
+      st.dpr = Math.min(window.devicePixelRatio || 1, 2);
+      fx.width = Math.round(st.W * st.dpr); fx.height = Math.round(st.H * st.dpr);
+      const g = map.latLngToContainerPoint(L.latLng(CENTRE));
+      st.gate = { x: g.x, y: g.y };
+      const ringPx = (m) => g.distanceTo(map.latLngToContainerPoint(L.latLng(CENTRE[0] + m / 111320, CENTRE[1])));
+      st.rings = st.tow
+        ? [[300, '300 m', st.tow.n300], [500, '500 m', st.tow.n500], [1000, '1 km', st.tow.n1000]].map(([m, label, n]) => ({ px: ringPx(m), label, n }))
+        : [[500, '500 m', null]].map(([m, label, n]) => ({ px: ringPx(m), label, n }));
+      const wide = isWide();
+      const col = wide ? 448 : 0;
+      const w = wide ? Math.min(720, st.W - col - 72) : st.W - 32;
+      cam.style.width = `${w}px`;
+      cam.style.left = `${wide ? col + (st.W - col - w) / 2 : 16}px`;
+      const h = cam.offsetHeight;
+      cam.style.top = `${wide ? Math.max(24, (st.H - h) / 2) : Math.max(64, st.H - h - 12)}px`;  // phones: at the bottom, titles above
+      st.k = screen.clientWidth / st.d.frame_size[0];
+      camFx.width = Math.round(screen.clientWidth * st.dpr); camFx.height = Math.round(screen.clientHeight * st.dpr);
+    }
+
+    function pill(ctx, text, x, y, font, align = 'center') {
+      ctx.font = font;
+      const w = ctx.measureText(text).width + 16, h = 24;
+      const left = align === 'center' ? x - w / 2 : x;
+      ctx.fillStyle = 'rgba(12,14,19,.78)';
+      ctx.beginPath(); ctx.roundRect(left, y - h / 2, w, h, 12); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(text, left + 8, y + 1);
+    }
+    function dot(ctx, p, label, a, t, accent, ink) {
+      if (a <= 0) return;
+      const pulse = (t / 1.2) % 1;
+      ctx.save();
+      ctx.globalAlpha = a * (1 - pulse) * 0.8;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 7 + 16 * pulse, 0, 2 * Math.PI);
+      ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.stroke();
+      ctx.globalAlpha = a;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 7, 0, 2 * Math.PI);
+      ctx.fillStyle = accent; ctx.fill(); ctx.strokeStyle = ink; ctx.lineWidth = 2; ctx.stroke();
+      if (label) pill(ctx, label, p.x + 14, p.y, '650 13px system-ui, sans-serif', 'left');
+      ctx.restore();
+    }
+
+    // the map layer: Seoul and the gate during the dive, then the rings on the Leaflet map, then the dimming
+    function drawMap(st, t, view) {
+      const ctx = fx.getContext('2d');
+      ctx.setTransform(st.dpr, 0, 0, st.dpr, 0, 0);
+      ctx.clearRect(0, 0, st.W, st.H);
+      const out = 1 - seg(t, T.handoff, T.handoff + 0.45);
+      if (view && st.globe) {
+        const p = st.globe.project(SEOUL);
+        dot(ctx, p, 'Seoul', seg(view.zoom, 4, 4.8) * (1 - seg(view.zoom, 9.5, 10.5)), t, st.accent, st.ink);
+      }
+      if (t >= T.rings) {
+        const rp = seg(t, T.rings, T.rings + 1.3), big = st.rings[st.rings.length - 1].px;
+        if (rp < 1) {
+          ctx.globalAlpha = 0.6 * (1 - rp);
+          ctx.beginPath(); ctx.arc(st.gate.x, st.gate.y, big * 1.15 * outCubic(rp), 0, 2 * Math.PI);
+          ctx.strokeStyle = st.accent; ctx.lineWidth = 3; ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
+        st.rings.forEach((rg, i) => {
+          const s = T.rings + i * T.ringGap, p = outCubic(seg(t, s, s + T.ringDur));
+          if (p <= 0) return;
+          ctx.globalAlpha = out;
+          ctx.beginPath(); ctx.arc(st.gate.x, st.gate.y, rg.px * p, 0, 2 * Math.PI);
+          ctx.fillStyle = st.towColour; ctx.globalAlpha = 0.08 * p * out; ctx.fill();
+          ctx.globalAlpha = out; ctx.setLineDash([10, 7]); ctx.strokeStyle = st.towColour; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
+          const la = seg(t, s + 0.45, s + 0.8) * out;
+          if (la > 0) {
+            const ang = -Math.PI / 3;
+            const x = Math.min(st.W - 70, Math.max(70, st.gate.x + rg.px * Math.cos(ang)));
+            const y = Math.min(st.H - 20, Math.max(20, st.gate.y + rg.px * Math.sin(ang)));
+            ctx.globalAlpha = la;
+            pill(ctx, rg.n == null ? rg.label : `${rg.label} · ${num(rg.n * outCubic(seg(t, s + 0.3, s + 1.0)))}`, x, y, '700 13px system-ui, sans-serif');
+          }
+          ctx.globalAlpha = 1;
+        });
+      }
+      const gp = view && st.globe ? st.globe.project(GATE) : st.gate;
+      const ga = view ? seg(view.zoom, 10, 11) : out;
+      dot(ctx, gp, t < T.cam + 0.45 ? 'Gwanghwamun Gate' : '', ga, t, st.accent, st.ink);
+      const dim = 0.55 * seg(t, T.cam - 0.1, T.cam + 0.45) * out;
+      if (dim > 0) { ctx.fillStyle = `rgba(6,8,12,${dim})`; ctx.fillRect(0, 0, st.W, st.H); }
+    }
+
+    // the viewfinder layer: Muse Spark's scan, SAM 3.1's outlines, the ruler (frame pixels)
+    function drawCam(st, t) {
+      const ctx = camFx.getContext('2d');
+      const s = st.k * st.dpr, d = st.d;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, camFx.width, camFx.height);
+      ctx.setTransform(s, 0, 0, s, 0, 0);
+      const [FW, FH] = d.frame_size;
+      const u = Math.max(1, 0.5 / st.k);  // keeps the ruler's labels readable on a phone-sized viewfinder
+      if (t > T.spark[0] && t < T.spark[1] + 0.2) {
+        const y = FH * inOut(seg(t, T.spark[0], T.spark[1]));
+        const a = 1 - seg(t, T.spark[1], T.spark[1] + 0.2);
+        const g = ctx.createLinearGradient(0, y - 120, 0, y);
+        g.addColorStop(0, 'rgba(255,210,63,0)'); g.addColorStop(1, `rgba(255,210,63,${0.32 * a})`);
+        ctx.fillStyle = g; ctx.fillRect(0, y - 120, FW, 120);
+        ctx.fillStyle = `rgba(255,226,120,${0.95 * a})`; ctx.fillRect(0, y - 2, FW, 4);
+      }
+      if (t >= T.sam[0]) {
+        const dimTo = 1 - 0.45 * seg(t, T.measure[0], T.measure[0] + 0.4);
+        st.outlines.forEach((o, i) => {
+          const s0 = T.sam[0] + i * 0.09, p = outCubic(seg(t, s0, s0 + 0.55));
+          if (p <= 0) return;
+          ctx.beginPath();
+          o.pts.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+          ctx.closePath();
+          ctx.fillStyle = `rgba(255,210,63,${0.3 * seg(t, s0 + 0.35, s0 + 0.75) * dimTo})`; ctx.fill();
+          ctx.setLineDash([o.len * p, o.len]);
+          ctx.strokeStyle = `rgba(255,210,63,${dimTo})`; ctx.lineWidth = 4; ctx.lineJoin = 'round'; ctx.stroke();
+          ctx.setLineDash([]);
+        });
+      }
+      if (t >= T.measure[0] + 0.1) {
+        const [e0, e1] = d.gap_px;
+        const m = [(e0[0] + e1[0]) / 2, (e0[1] + e1[1]) / 2];
+        const p = outCubic(seg(t, T.measure[0] + 0.1, T.measure[0] + 0.55));
+        const a = [m[0] + (e0[0] - m[0]) * p, m[1] + (e0[1] - m[1]) * p];
+        const b = [m[0] + (e1[0] - m[0]) * p, m[1] + (e1[1] - m[1]) * p];
+        const len = Math.hypot(e1[0] - e0[0], e1[1] - e0[1]);
+        const nx = -(e1[1] - e0[1]) / len, ny = (e1[0] - e0[0]) / len;  // unit normal (points down-ish)
+        const line = (p0, p1, w, c) => { ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.lineWidth = w; ctx.strokeStyle = c; ctx.lineCap = 'round'; ctx.stroke(); };
+        line(a, b, 11 * u, 'rgba(0,0,0,.55)');
+        line(a, b, 6 * u, '#ffd23f');
+        const ca = seg(t, T.measure[0] + 0.5, T.measure[0] + 0.65);
+        if (ca > 0) {
+          ctx.globalAlpha = ca;
+          for (const e of [e0, e1]) line([e[0] - nx * 22 * u, e[1] - ny * 22 * u], [e[0] + nx * 22 * u, e[1] + ny * 22 * u], 6 * u, '#ffd23f');
+          ctx.globalAlpha = 1;
+        }
+        const text = (str, x, y, size, fill) => {
+          ctx.font = `800 ${size}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+          ctx.lineWidth = size * 0.22; ctx.strokeStyle = 'rgba(0,0,0,.75)'; ctx.lineJoin = 'round';
+          ctx.strokeText(str, x, y); ctx.fillStyle = fill; ctx.fillText(str, x, y);
+        };
+        text(`${num(d.gap_cm * outCubic(seg(t, T.measure[0] + 0.2, T.measure[0] + 0.9)))} cm`, m[0] - nx * 30 * u, m[1] - ny * 30 * u, 56 * u, '#fff');
+        const ba = seg(t, T.measure[0] + 0.7, T.measure[0] + 0.95);
+        if (ba > 0) { ctx.globalAlpha = ba; text(`95% band ${num(d.band_cm[0])}–${num(d.band_cm[1])} cm`, m[0] + nx * 52 * u, m[1] + ny * 52 * u, 26 * u, '#fff'); ctx.globalAlpha = 1; }
+        const na = seg(t, T.measure[0] + 0.85, T.measure[0] + 1.1);
+        if (na > 0) {
+          const half = (len * d.needed_cm) / d.gap_cm / 2, ux = (e1[0] - e0[0]) / len, uy = (e1[1] - e0[1]) / len;
+          const c = [m[0] + nx * 84 * u, m[1] + ny * 84 * u];
+          ctx.globalAlpha = na;
+          line([c[0] - ux * half, c[1] - uy * half], [c[0] + ux * half, c[1] + uy * half], 11 * u, 'rgba(0,0,0,.55)');
+          line([c[0] - ux * half, c[1] - uy * half], [c[0] + ux * half, c[1] + uy * half], 6 * u, '#3ddc84');
+          text(`needs ${num(d.needed_cm)} cm`, c[0] + nx * 40 * u, c[1] + ny * 40 * u, 26 * u, '#3ddc84');
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
+
+    // Fritsch-Carlson monotone cubic through [[x, y], ...], flat at both ends
+    function monotone(keys) {
+      const n = keys.length, h = [], dl = [], m = new Array(n).fill(0);
+      for (let i = 0; i < n - 1; i++) { h[i] = keys[i + 1][0] - keys[i][0]; dl[i] = (keys[i + 1][1] - keys[i][1]) / h[i]; }
+      for (let i = 1; i < n - 1; i++) m[i] = dl[i - 1] * dl[i] <= 0 ? 0 : (3 * (h[i - 1] + h[i])) / ((2 * h[i] + h[i - 1]) / dl[i - 1] + (h[i] + 2 * h[i - 1]) / dl[i]);
+      return (x) => {
+        if (x <= keys[0][0]) return keys[0][1];
+        if (x >= keys[n - 1][0]) return keys[n - 1][1];
+        let i = 0;
+        while (x > keys[i + 1][0]) i++;
+        const s = (x - keys[i][0]) / h[i], s2 = s * s, s3 = s2 * s;
+        return (2 * s3 - 3 * s2 + 1) * keys[i][1] + (s3 - 2 * s2 + s) * h[i] * m[i] + (-2 * s3 + 3 * s2) * keys[i + 1][1] + (s3 - s2) * h[i] * m[i + 1];
+      };
+    }
+    function camera(st, t) {
+      const z = st.zoomAt(t);
+      // path parameter whose zoom is z (the table is monotone in zoom)
+      const tb = st.uz;
+      let i = 1;
+      while (i < tb.length - 1 && tb[i][1] < z) i++;
+      const [u0, z0] = tb[i - 1], [u1, z1] = tb[i];
+      const [x, y] = st.path(z1 > z0 ? u0 + ((z - z0) / (z1 - z0)) * (u1 - u0) : u1);
+      return { lon: lonOf(x), lat: latOf(y), zoom: z };
+    }
+
+    function render(st, t, live) {
+      overlay.dataset.t = t.toFixed(2);  // the clock, for checks and screen captures
+      const view = st.globe && t < T.swap[1] ? camera(st, t) : null;
+      if (view) {
+        st.globe.jumpTo({ center: [view.lon, view.lat], zoom: view.zoom });
+        st.globe.redraw();  // draw now, so the dots on the canvas above stay on the same frame
+      }
+      const gOut = st.hadGlobe ? 1 - seg(t, T.swap[0], T.swap[1]) : 0;
+      globeHost.style.opacity = gOut;
+      $('#iv-mapcredit').style.opacity = gOut;
+      if (live && st.globe && t >= T.swap[1]) { st.globe.remove(); st.globe = null; }
+      document.body.classList.toggle('intro-on', t < T.handoff);
+
+      // titles and crumbs
+      st.heads.forEach((h) => {
+        const o = fadeIO(t, h.a, h.b, 0.3);
+        h.el.style.opacity = o;
+        h.el.style.transform = `translateY(${(1 - outCubic(seg(t, h.a, h.a + 0.45))) * 16}px)`;
+        if (h.count) h.count.textContent = num(Number(h.count.dataset.count) * outCubic(seg(t, T.rings + 0.1, T.rings + 1.25)));
+      });
+      crumbs.style.opacity = st.hadGlobe ? fadeIO(t, 0.15, T.swap[1] + 0.1) : 0;
+      let lastOn = -1;
+      st.crumbs.forEach((li, i) => { const o = seg(t, st.crumbT[i], st.crumbT[i] + 0.25); li.style.opacity = o; li.hidden = o === 0; if (o > 0) lastOn = i; });
+      st.crumbs.forEach((li, i) => li.classList.toggle('on', i === lastOn));
+      if (view) {
+        $('#iv-coords').textContent = `${Math.abs(view.lat).toFixed(2)}° ${view.lat >= 0 ? 'N' : 'S'} · ${Math.abs(((view.lon + 540) % 360) - 180).toFixed(2)}° ${((view.lon + 540) % 360) - 180 >= 0 ? 'E' : 'W'}`;
+      }
+
+      // station exits pop up on the real map, nearest first
+      if (t >= T.exits - 0.05 && !st.pins.length) {
+        const m = map.getContainer().getBoundingClientRect();
+        st.pins = [...document.querySelectorAll('#map .exit-pin')].map((el) => {
+          const r = el.getBoundingClientRect();
+          return { el, d: Math.hypot(r.left + r.width / 2 - m.left - st.gate.x, r.top + r.height / 2 - m.top - st.gate.y) };
+        }).sort((p, q) => p.d - q.d).map((p) => p.el);
+      }
+      st.pins.forEach((el, i) => {
+        const s = T.exits + i * 0.05, p = outBack(seg(t, s, s + 0.35));
+        el.style.opacity = clamp01(p * 3);
+        el.style.transform = `scale(${p})`;
+      });
+
+      // the viewfinder
+      const ci = outCubic(seg(t, T.cam, T.cam + 0.6)), co = seg(t, T.handoff, T.handoff + 0.45);
+      cam.style.opacity = seg(t, T.cam, T.cam + 0.35) * (1 - co);
+      cam.style.transform = `translateY(${(1 - ci) * 40}px) scale(${(0.94 + 0.06 * ci) * (1 - 0.05 * co)})`;
+      if (live) {
+        if (t >= T.play && t < T.freeze && !st.played) { st.played = true; try { video.currentTime = 0; } catch { /* not loaded */ } video.play().catch(() => {}); }
+        if (t >= T.freeze && !video.paused) video.pause();
+      } else {
+        const ct = Math.min(Math.max(t - T.play, 0), 2.9);
+        if (video.readyState >= 1 && Math.abs(video.currentTime - ct) > 0.02) video.currentTime = ct;
+      }
+      still.style.opacity = seg(t, T.freeze, T.freeze + 0.08);
+      $('#iv-flash').style.opacity = t >= T.freeze ? 0.8 * (1 - seg(t, T.freeze, T.freeze + 0.35)) : 0;
+      zoomBox.style.transform = `scale(${1 + 0.06 * inOut(seg(t, T.freeze, T.end))})`;
+      st.tags.forEach((g) => {
+        g.el.style.opacity = fadeIO(t, g.at, T.measure[0], 0.25);
+        g.el.style.transform = `translateX(${(1 - outCubic(seg(t, g.at, g.at + 0.35))) * -14}px)`;
+      });
+      $('#iv-hud-cam').parentElement.style.opacity = 1 - seg(t, T.freeze, T.freeze + 0.2);
+      const v = $('#iv-verdict');
+      v.style.opacity = seg(t, T.verdict, T.verdict + 0.15);
+      v.style.transform = `scale(${outBack(seg(t, T.verdict, T.verdict + 0.4))})`;
+      const n = Math.round(st.say.length * seg(t, T.explain[0], T.explain[1]));
+      $('#iv-say').innerHTML = n ? `“${esc(st.say.slice(0, n))}${n === st.say.length ? `” <cite>Muse Spark 1.3</cite>` : ''}` : '';
+      st.rail.forEach((li, i) => { li.dataset.state = t >= RAIL[i + 1] ? 'done' : t >= RAIL[i] ? 'run' : ''; });
+
+      drawMap(st, t, view);
+      if (t >= T.cam) drawCam(st, t);
+    }
+
+    function finish(st) {
+      if (st.done) return;
+      st.done = true;
+      cancelPlay = null;
+      cancelAnimationFrame(st.raf);
+      window.removeEventListener('resize', st.onResize);
+      if (st.globe) { try { st.globe.remove(); } catch { /* gone */ } st.globe = null; }
+      video.pause(); video.removeAttribute('src'); video.load();
+      st.pins.forEach((el) => { el.style.opacity = ''; el.style.transform = ''; });
+      for (const c of [fx, camFx]) c.getContext('2d').clearRect(0, 0, c.width, c.height);
+      document.body.classList.remove('intro-on');
+      overlay.classList.remove('static');
+      overlay.hidden = true;
+      if (skipBtn && document.activeElement === skipBtn) skipBtn.blur();
+      markSeen();
+      st.resolve();
+    }
+
+    // Reduced motion: no globe and no motion; the location line alone for 3.5 s.
     function playStatic() {
       return new Promise((resolve) => {
-        let settled = false;
-        const done = () => {
-          if (settled) return;
-          settled = true;
-          cancelPlay = null;
-          markSeen();
-          hideCap();
-          resolve();
-        };
-        cancelPlay = done;
-        showCap('Gwanghwamun Gate, Seoul, South Korea');
-        setTimeout(done, 3000);
+        const st = { done: false, pins: [], resolve, onResize: null };
+        overlay.hidden = false;
+        overlay.classList.add('static');
+        heads.innerHTML = '';
+        for (const el of [globeHost, cam, $('#iv-mapcredit')]) el.style.opacity = 0;
+        crumbs.style.opacity = '';
+        crumbs.querySelectorAll('li').forEach((li) => { li.style.opacity = ''; li.hidden = false; li.classList.remove('on'); });
+        crumbs.querySelector('li:last-child').classList.add('on');
+        $('#iv-coords').textContent = '37.58° N · 126.98° E';
+        cancelPlay = () => finish(st);
+        setTimeout(() => finish(st), 3500);
       });
     }
 
     function playAnimated() {
       return new Promise((resolve) => {
-        let settled = false;
-        let raf = 0;
-        let detachResize = null;
-        const stopLoop = () => {
-          if (raf) cancelAnimationFrame(raf);
-          raf = 0;
-          if (detachResize) { window.removeEventListener('resize', detachResize); detachResize = null; }
-        };
-        const hideOverlayNow = () => {
-          if (overlay) { overlay.classList.remove('fading'); overlay.hidden = true; }
-        };
-        const endSkip = () => {  // straight to the final normal state
-          if (settled) return;
-          settled = true;
-          cancelPlay = null;
-          stopLoop();
-          markSeen();
-          creditOff();
-          hideOverlayNow();
-          if (cap) { cap.classList.remove('fading'); cap.hidden = true; }
-          blurSkip();
-          finalMapState(false);
-          resolve();
-        };
-        const endNatural = () => {  // after the ~6.5 s arc
-          if (settled) return;
-          settled = true;
-          cancelPlay = null;
-          stopLoop();
-          markSeen();
-          creditOff();
-          hideCap();  // fades, then hides
-          blurSkip();
-          resolve();
-        };
-        const giveUp = () => {  // vendor JSON missing: silent, unmarked, map untouched
-          if (settled) return;
-          settled = true;
-          cancelPlay = null;
-          resolve();
-        };
-        cancelPlay = endSkip;
-
-        const load = Promise.all([
-          fetch('/static/vendor/land-110m.json').then((r) => { if (!r.ok) throw new Error('land'); return r.json(); }),
-          fetch('/static/vendor/countries-110m.json').then((r) => { if (!r.ok) throw new Error('countries'); return r.json(); }),
-        ]);
-        const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000));
-        Promise.race([load, timeout]).then(([landTopo, cTopo]) => {
-          if (settled) return;
-          reveal(landTopo, cTopo);
-        }).catch(giveUp);
-
-        function reveal(landTopo, cTopo) {
-          let land = null;
-          let korea = null;
-          try {
-            land = window.topojson.feature(landTopo, landTopo.objects.land);
-            const feats = window.topojson.feature(cTopo, cTopo.objects.countries).features;
-            korea = feats.find((f) => f && f.properties && f.properties.name === 'South Korea') || null;
-          } catch { giveUp(); return; }
-          const ctx = canvas.getContext('2d');
-          if (!ctx) { giveUp(); return; }
-
-          // The Leaflet map sits at about zoom 11 over Seoul under the overlay.
-          try { centreOn(L.latLng([37.55, 126.98]), 11); } catch { /* keep view */ }
-          creditOn();
-          overlay.hidden = false;
-          overlay.classList.remove('fading');
-          showCap('Where in the world?');
-          try { skipBtn.focus({ preventScroll: true }); } catch { try { skipBtn.focus(); } catch { /* ignore */ } }
-
-          const dpr = Math.min(window.devicePixelRatio || 1, 2);
-          let W = 0, H = 0, R0 = 0, CX = 0, CY = 0;
-          const measure = () => {
-            const r = overlay.getBoundingClientRect();
-            W = Math.max(1, Math.round(r.width * dpr));
-            H = Math.max(1, Math.round(r.height * dpr));
-            if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
-            const wide = window.matchMedia('(min-width: 900px)').matches;
-            CX = W / 2 + (wide ? 208 * dpr : 0);
-            CY = H * 0.44;
-            R0 = 0.40 * Math.min(W, H);
-          };
-          measure();
-          detachResize = measure;
-          window.addEventListener('resize', measure);
-
-          const projection = window.d3.geoOrthographic().translate([CX, CY]).clipAngle(90);
-          const path = window.d3.geoPath(projection, ctx);
-          const grat = window.d3.geoGraticule10();
-          const segA = window.d3.geoInterpolate([25, -38], [-114, -28]);  // Atlantic/Europe -> East Asia
-          const segB = window.d3.geoInterpolate([-114, -28], [-126, -35]);  // -> Korean peninsula
-          const T_A = 2.6, T_B = 4.0, T_C = 5.0, T_END = 6.5;
-          const ocean = cssVar('--globe-ocean') || '#17263f';
-          const landFill = cssVar('--globe-land') || '#9aa3b2';
-          const gratStroke = cssVar('--globe-grat') || 'rgba(255,255,255,.16)';
-          const rim = cssVar('--globe-rim') || 'rgba(255,255,255,.28)';
-          const accent = cssVar('--accent') || '#ffd23f';
-          const ink = cssVar('--accent-ink') || '#121212';
-          const textCol = cssVar('--text') || '#fff';
-          const t0 = performance.now();
-          let flew = false;
-
-          const frame = (now) => {
-            if (settled) return;
-            const t = (now - t0) / 1000;
-            const rot = t < T_A ? segA(easeInOut(Math.min(1, t / T_A)))
-              : segB(easeInOut(Math.min(1, (t - T_A) / (T_B - T_A))));
-            const zoom = t < T_A ? lerp(0.85, 1.15, easeInOut(Math.min(1, t / T_A)))
-              : lerp(1.15, 1.6, easeInOut(Math.min(1, (t - T_A) / (T_B - T_A))));
-            const R = R0 * zoom;
-            projection.rotate(rot).scale(R).translate([CX, CY]);
-
-            ctx.clearRect(0, 0, W, H);
-            ctx.beginPath(); path({ type: 'Sphere' }); ctx.fillStyle = ocean; ctx.fill();
-            if (land) { ctx.beginPath(); path(land); ctx.fillStyle = landFill; ctx.fill(); }
-            ctx.beginPath(); path(grat);
-            ctx.strokeStyle = gratStroke; ctx.lineWidth = Math.max(1, dpr * 0.6); ctx.stroke();
-            if (korea && t > 2.2) {  // South Korea fills with the accent colour
-              ctx.save();
-              ctx.globalAlpha = Math.min(1, (t - 2.2) / 0.6);
-              ctx.beginPath(); path(korea); ctx.fillStyle = accent; ctx.fill();
-              ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = Math.max(1, dpr * 0.7); ctx.stroke();
-              ctx.restore();
+        const st = { done: false, pins: [], resolve, played: false, globe: null, raf: 0 };
+        cancelPlay = () => finish(st);
+        centreOn(L.latLng(CENTRE), 16);  // the view the intro lands on, before the panel slides away
+        overlay.classList.remove('static');
+        overlay.hidden = false;
+        heads.innerHTML = '';
+        globeHost.style.opacity = 1;
+        st.accent = cssVar('--accent'); st.ink = cssVar('--accent-ink'); st.towColour = cssVar('--tow');
+        video.muted = true;
+        video.src = '/static/demo/intro-corridor.mp4';
+        video.preload = 'auto';
+        still.src = '/static/demo/intro-corridor-77.jpg';
+        const topo = Promise.all([getJson('/static/vendor/land-110m.json'), getJson('/static/vendor/countries-110m.json')]).catch(() => null);
+        Promise.all([getJson('/static/demo/intro-corridor.json'), within(loadTowing().catch(() => null), 2500), within(topo, 2500)])
+          .then(([d, tow, topoJson]) => {
+            if (st.done) return;
+            st.d = d; st.tow = tow;
+            buildText(st);
+            measure(st);
+            const c = map.getCenter();
+            const end = [mx(c.lng), my(c.lat), st.W / (512 * 2 ** (map.getZoom() - 1))];
+            const z0 = Math.log2((0.36 * Math.min(st.W, st.H) * 2 * Math.PI) / 512);
+            st.path = zoomPath([mx(START[0]), my(START[1]), st.W / (512 * 2 ** z0)], end);
+            st.uz = [];
+            for (let i = 0, top = -Infinity; i <= 400; i++) {
+              top = Math.max(top, Math.log2(st.W / (512 * st.path(i / 400)[2])));
+              st.uz.push([i / 400, top]);
             }
-            ctx.beginPath(); path({ type: 'Sphere' });
-            ctx.strokeStyle = rim; ctx.lineWidth = Math.max(1, dpr * 1.2); ctx.stroke();
-            if (t > T_A) {  // pulsing Seoul dot + label
-              const p = projection(SEOUL_LONLAT);
-              if (p) {
-                const dx = p[0] - CX, dy = p[1] - CY;
-                if (dx * dx + dy * dy <= R * R) {
-                  const a = Math.min(1, (t - T_A) / 0.6);
-                  const pulse = (now / 1200) % 1;
-                  ctx.save();
-                  ctx.globalAlpha = a * (1 - pulse) * 0.7;
-                  ctx.beginPath(); ctx.arc(p[0], p[1], (6 + 11 * pulse) * dpr, 0, 2 * Math.PI);
-                  ctx.strokeStyle = accent; ctx.lineWidth = 2 * dpr; ctx.stroke();
-                  ctx.globalAlpha = a;
-                  ctx.beginPath(); ctx.arc(p[0], p[1], 4.5 * dpr, 0, 2 * Math.PI);
-                  ctx.fillStyle = accent; ctx.fill();
-                  ctx.strokeStyle = ink; ctx.lineWidth = 1.5 * dpr; ctx.stroke();
-                  ctx.font = `600 ${13 * dpr}px system-ui, sans-serif`;
-                  ctx.lineWidth = 3 * dpr; ctx.strokeStyle = ocean;
-                  ctx.strokeText('Seoul', p[0] + 10 * dpr, p[1] - 10 * dpr);
-                  ctx.fillStyle = textCol;
-                  ctx.fillText('Seoul', p[0] + 10 * dpr, p[1] - 10 * dpr);
-                  ctx.restore();
-                }
-              }
+            const zEnd = map.getZoom() - 1;
+            st.zoomAt = monotone(ZKEYS.map(([t, z], i) => [t, i === 0 ? z0 : i === ZKEYS.length - 1 ? zEnd : z]));
+            // when each crumb lights up, read off the camera path
+            const when = [() => true, (v) => v.lon > 70, (v) => v.zoom > 3.6, (v) => v.zoom > 7.2, (v) => v.zoom > 11.2];
+            st.crumbT = when.map(() => T.dive);
+            for (let i = 0, k = 0; i <= 320 && k < when.length; i++) {
+              const t = (i / 320) * T.dive;
+              while (k < when.length && when[k](camera(st, t))) st.crumbT[k++] = t;
             }
-
-            if (t < T_A * 0.55) setCaption('Where in the world?');  // the globe still faces the Atlantic
-            else if (t < T_A) setCaption('East Asia');
-            else if (t < T_B) setCaption('South Korea');
-            else if (t < T_C) {
-              setCaption('Seoul');
-              if (!overlay.classList.contains('fading')) overlay.classList.add('fading');
-            } else if (!flew) {
-              flew = true;
-              hideOverlayNow();
-              setCaption('Gwanghwamun Gate · Gyeongbokgung Palace');
-              finalMapState(true);
-            }
-            if (t >= T_END) { endNatural(); return; }
-            raf = requestAnimationFrame(frame);
-          };
-          raf = requestAnimationFrame(frame);
-        }
+            st.crumbT = st.crumbT.map((t, i) => Math.max(t, i * 0.3));
+            const start = camera(st, 0);
+            st.globe = topoJson ? makeGlobe(topoJson, start) : null;
+            const ready = st.globe ? within(new Promise((r) => st.globe.once('load', r)), 2500) : Promise.resolve();
+            return ready.then((ok) => {
+              if (st.done) return;
+              if (st.globe && ok === null) { st.globe.remove(); st.globe = null; }  // style never loaded
+              st.hadGlobe = !!st.globe;
+              st.onResize = () => measure(st);
+              window.addEventListener('resize', st.onResize);
+              if (skipBtn) { try { skipBtn.focus({ preventScroll: true }); } catch { skipBtn.focus(); } }
+              const from = AT != null ? AT : st.globe ? 0 : T.swap[0];
+              const live = AT == null || params.has('go');
+              const t0 = performance.now() - from * 1000;
+              const frame = (now) => {
+                if (st.done) return;
+                const t = live ? (now - t0) / 1000 : from;
+                render(st, t, live);
+                if (live && t >= T.end) { finish(st); return; }
+                st.raf = requestAnimationFrame(frame);
+              };
+              st.raf = requestAnimationFrame(frame);
+            });
+          })
+          .catch(() => finish(st));  // the intro's own data is missing: leave the page as it is
       });
     }
 
     playIntroNow = (opts = {}) => {
-      const force = !!opts.force;
-      if (!overlay || !canvas || !cap || !skipBtn) return Promise.resolve();
+      if (!overlay || !skipBtn) return Promise.resolve();
       if (location.hash === '#nointro') return Promise.resolve();
-      if (!force && seen()) return Promise.resolve();
+      if (!opts.force && AT == null && seen()) return Promise.resolve();
       if (cancelPlay) cancelPlay();  // a replay never overlaps a running intro
-      if (reduceMq.matches) return playStatic();
-      if (!window.d3 || !window.topojson) return Promise.resolve();
-      return playAnimated();
+      return reduceMq.matches ? playStatic() : playAnimated();
     };
   }
 
