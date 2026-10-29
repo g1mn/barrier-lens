@@ -485,7 +485,9 @@
     dropPin(result, at);
     if (stage.classList.contains('no-video')) { check.playing = false; togglePlay(); } else { draw(); video.play().catch(() => {}); }
     loopForVideo();
-    $('#verdict').focus({ preventScroll: true }); $('#verdict').scrollIntoView({ block: 'start' });  // card taller than the sheet: show its verdict word, not its middle
+    if (!tourRunning) {  // the tour keeps focus and scrolls on its own card instead
+      $('#verdict').focus({ preventScroll: true }); $('#verdict').scrollIntoView({ block: 'start' });  // card taller than the sheet: show its verdict word, not its middle
+    }
   }
 
   // result.masks: [{concept, role, source, frames: [{i, objects: [{id, polygon, polygons}]}]}] in frame_size pixels.
@@ -979,12 +981,285 @@
   }
   fillForm();
 
+  // ------------------------------------------------------------------ 1-minute tour
+  // Self-running tour for a judge: no upload, no paid calls. It drives the real UI
+  // (the sample buttons, setSheet, centreOn) in replay mode. One data array on top:
+  // change samples, targets, durations or copy here and the engine follows.
+  let tourRunning = false;
+  const tourCardEl = $('#tour-card');
+  const tourPauseBtn = $('#tour-pause');
+  const tourNextBtn = $('#tour-next');
+  const tourEndBox = $('#tour-end');
+  const tourReduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const tour = { active: false, paused: false, ended: false, idx: 0, remain: 0, seq: 0, swapped: false, timer: 0, calibWasOpen: false };
+  const tourOk = (tok) => tour.active && tok === tour.seq;
+
+  function tourMapText() {
+    const tow = $('#towing-stat').textContent.trim().replace(/\s+/g, ' ');
+    const st = $('#station-line').textContent.trim().replace(/\s+/g, ' ');
+    if (/loading|unavailable|could not/i.test(tow)) {
+      return 'Gwanghwamun & Gyeongbokgung. Past e-scooter towing reports within the ring (Seoul open data) and both stations\u2019 elevators, live from Seoul Metro.';
+    }
+    const short = st.length > 150 ? `${st.slice(0, 150)}\u2026` : st;
+    return `${tow} Both stations\u2019 elevators are live from Seoul Metro: ${short}`;
+  }
+  function tourCautiousText() {
+    const r = check.result;
+    const p = r && r.triage && r.triage.path;
+    if (p && p.state && p.evidence && r.verdict && VERDICT_WORD[r.verdict]) {
+      return `Muse Spark read \u201c${p.evidence}\u201d \u2014 the path is ${p.state} \u2014 so the answer is ${VERDICT_WORD[r.verdict]} whatever the geometry measured. A model may only make the answer more cautious.`;
+    }
+    return 'The triage model reads the clip first. A model may only make the answer more cautious, never looser.';
+  }
+  function tourMeasuredText() {
+    const r = check.result;
+    if (r && r.gap_cm != null && Array.isArray(r.band_cm)) {
+      const chair = Math.round((r.assumptions && r.assumptions.chair_width_cm)
+        || (r.measurement_detail && r.measurement_detail.wheelchair_cm) || 65);
+      return `With the camera\u2019s height and tilt known, geometry measures the gap from SAM 3.1\u2019s outlines: about ${Math.round(r.gap_cm)} cm, range ${Math.round(r.band_cm[0])}\u2013${Math.round(r.band_cm[1])}, so a ${chair} cm chair fits.`;
+    }
+    return 'With the camera\u2019s height and tilt known, geometry measures the gap from SAM 3.1\u2019s outlines, with an error range instead of a single number.';
+  }
+  const TOUR_STEPS = [
+    { id: 'map', title: 'Gwanghwamun & Gyeongbokgung', dur: 6,
+      targets: [['#towing-stat', '#station-line']],
+      text: tourMapText,
+      enter: async () => { tourShowOverview(); setSheet('half'); tourCentre(); } },
+    { id: 'check', title: 'Film ten seconds', dur: 5,
+      targets: [['#clip', '#tilt-row']],
+      text: () => 'You film ten seconds at seated height. Faces are blurred on our server before any model sees the clip; the phone\u2019s tilt goes with it.',
+      enter: async () => { tourShowCheck(); } },
+    { id: 'pipeline', title: 'The pipeline, replayed', dur: 8, sample: 'closed',
+      targets: [['#stages']],
+      text: () => 'Five stages: blur \u2192 Muse Spark triage \u2192 SAM 3.1 outlines \u2192 geometry measures \u2192 Muse Spark explains. Below is a replay of the recorded run\u2019s stage times.',
+      enter: (tok) => tourPlaySample(tok, 'closed', true) },
+    { id: 'cautious', title: 'The model can only be more cautious', dur: 9,
+      targets: [['#v-saw', '#verdict']],
+      text: tourCautiousText },
+    { id: 'unknown', title: 'An honest Unknown', dur: 8, sample: 'scooters',
+      targets: [['#v-fixit'], ['#verdict']],
+      text: () => 'No gap lies straight ahead, so there is nothing honest to measure: Unknown, with how to film again.',
+      enter: (tok) => tourPlaySample(tok, 'scooters', false) },
+    { id: 'measured', title: 'Measured, with its error', dur: 12, sample: 'known',
+      targets: [['#stage']], thenTargets: [['#v-bar'], ['#verdict']], thenAt: 0.5,
+      text: tourMeasuredText,
+      enter: (tok) => tourPlaySample(tok, 'known', false) },
+    { id: 'calib', title: 'Calibrate once', dur: 7,
+      targets: [['#calib']],
+      text: () => 'Calibrate once: chair width, armrest height, and three seconds of four A4 sheets on the floor. Then your own checks can become decisive.',
+      enter: async () => { tourShowCheck(); $('#calib').open = true; } },
+  ];
+  const TOUR_END_TEXT = 'That was the product, replayed from recorded live runs (Muse Spark 1.3 and SAM 3.1 on the Meta Model API). Live checks on your own clip need the judge token.';
+
+  // Quiet twins of enterCheck/leaveCheck: same panels, no focus moves (the tour owns focus).
+  function tourShowCheck() {
+    panelOverview.hidden = true;
+    panelCheck.hidden = false;
+    $('#check-btn').hidden = true;
+    crosshair.hidden = false;
+    setSheet('half');
+  }
+  function tourShowOverview() {
+    panelCheck.hidden = true;
+    panelOverview.hidden = false;
+    $('#check-btn').hidden = false;
+    crosshair.hidden = true;
+  }
+  function tourCentre() {
+    if (tourReduced.matches) map.setView(CENTRE, 16, { animate: false });
+    else centreOn(L.latLng(CENTRE), 16);
+  }
+  function tourVisible(sel) {
+    const el = $(sel);
+    return el && !el.hidden && el.getClientRects().length ? el : null;
+  }
+  function tourHighlight(step, phase) {
+    document.querySelectorAll('.tour-hit').forEach((el) => el.classList.remove('tour-hit'));
+    const groups = (phase ? step.thenTargets : step.targets) || step.targets;
+    const group = (groups || []).find((g) => g.some((sel) => tourVisible(sel)));
+    (group || []).forEach((sel) => { const el = tourVisible(sel); if (el) el.classList.add('tour-hit'); });
+  }
+  function tourScrollFirst() {
+    const hit = document.querySelector('.tour-hit');
+    if (hit) hit.scrollIntoView({ block: 'center', behavior: tourReduced.matches ? 'auto' : 'smooth' });
+  }
+  function tourRender(step) {
+    $('#tour-title').textContent = step.title;
+    $('#tour-text').textContent = step.text();
+    $('#tour-progress').textContent = `${tour.idx + 1} / ${TOUR_STEPS.length}`;
+  }
+  function tourWaitResult(tok, prev, timeoutMs) {
+    return new Promise((resolve) => {
+      const t0 = performance.now();
+      const tick = () => {
+        if (!tourOk(tok)) { resolve(null); return; }
+        if (check.result !== prev) { resolve(check.result); return; }
+        if (performance.now() - t0 > timeoutMs) { resolve(null); return; }
+        setTimeout(tick, 150);
+      };
+      tick();
+    });
+  }
+  async function tourPlaySample(tok, sampleKey, replay) {
+    tourShowCheck();
+    const btn = document.querySelector(`button[data-sample="${sampleKey}"]`);
+    const prev = check.result;
+    if (btn && !btn.disabled) btn.click();
+    const result = await tourWaitResult(tok, prev, 9000);
+    if (!tourOk(tok)) return;
+    const step = TOUR_STEPS[tour.idx];
+    $('#tour-text').textContent = step.text();
+    if (replay) { $('#stages').hidden = false; stageReset(); }  // visible before the highlight and scroll target it
+    tourHighlight(step, false);
+    tourScrollFirst();
+    if (replay) await tourReplayStages(tok, result);
+  }
+  async function tourReplayStages(tok, result) {
+    const ol = $('#stages');
+    ol.hidden = false;
+    ol.setAttribute('aria-label', 'Replay of the recorded run\u2019s stage times');
+    stageReset();
+    const order = ['blur', 'triage', 'sam', 'measure', 'explain'];
+    const keys = { blur: 'prepare_s', triage: 'triage_s', sam: 'sam_s', measure: 'measure_s', explain: 'explain_s' };
+    const rec = (result && result.timings) || {};
+    const w = order.map((k) => Math.max(0.05, Number(rec[keys[k]]) || 0.6));
+    const sum = w.reduce((a, b) => a + b, 0);
+    const budget = Math.max(0, tour.remain * 1000 - 600);
+    for (let i = 0; i < order.length; i += 1) {
+      if (!tourOk(tok)) return;
+      const li = ol.querySelector(`li[data-stage="${order[i]}"]`);
+      if (li) li.dataset.state = 'run';
+      let wait = budget > 0 ? (w[i] / sum) * budget : 0;
+      while (wait > 0) {
+        if (!tourOk(tok)) return;
+        if (!tour.paused) wait -= 100;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (!tourOk(tok)) return;
+      stageEvent({ stage: order[i], status: 'done', s: rec[keys[order[i]]] ?? '' });
+    }
+  }
+  async function tourEnter(i) {
+    const tok = ++tour.seq;
+    tour.idx = i;
+    tour.swapped = false;
+    const step = TOUR_STEPS[i];
+    tour.remain = step.dur;
+    tourRender(step);
+    tourCardEl.hidden = false;
+    if (step.enter) await step.enter(tok);
+    if (!tourOk(tok)) return;
+    $('#tour-text').textContent = step.text();
+    tourHighlight(step, false);
+    tourScrollFirst();
+  }
+  function tourNext() {
+    if (!tour.active || tour.ended) return;
+    if (tour.idx + 1 >= TOUR_STEPS.length) tourEnd();
+    else tourEnter(tour.idx + 1);
+  }
+  function tourTick() {
+    if (!tour.active || tour.paused || tour.ended) return;
+    const step = TOUR_STEPS[tour.idx];
+    tour.remain -= 0.2;
+    if (step.thenTargets && !tour.swapped && (step.dur - tour.remain) >= step.dur * (step.thenAt || 0.5)) {
+      tour.swapped = true;
+      tourHighlight(step, true);
+      tourScrollFirst();
+    }
+    if (tour.remain <= 0) tourNext();
+  }
+  function tourSetPaused(p) {
+    tour.paused = p;
+    tourPauseBtn.setAttribute('aria-pressed', String(p));
+    tourPauseBtn.textContent = p ? '▶ Resume' : '⏸ Pause';
+  }
+  function startTour() {
+    if (!tour.active) tour.calibWasOpen = $('#calib').open;
+    tourRunning = true;
+    tour.active = true;
+    tour.paused = false;
+    tour.ended = false;
+    tourCardEl.dataset.mode = 'steps';
+    tourCardEl.hidden = false;
+    tourPauseBtn.hidden = false;
+    tourNextBtn.hidden = false;
+    tourEndBox.hidden = true;
+    tourSetPaused(false);
+    tourCardEl.focus();
+    if (!tour.timer) tour.timer = setInterval(tourTick, 200);
+    tourEnter(0);
+  }
+  function tourEnd() {
+    tour.ended = true;
+    tour.seq += 1;  // cancel any pending sample wait or stage replay
+    document.querySelectorAll('.tour-hit').forEach((el) => el.classList.remove('tour-hit'));
+    $('#tour-title').textContent = 'That was the product';
+    $('#tour-text').textContent = TOUR_END_TEXT;
+    $('#tour-progress').textContent = `${TOUR_STEPS.length} / ${TOUR_STEPS.length}`;
+    tourPauseBtn.hidden = true;
+    tourNextBtn.hidden = true;
+    tourEndBox.hidden = false;
+  }
+  function tourCloseFull() {
+    tour.seq += 1;
+    tour.active = false;
+    tour.paused = false;
+    tour.ended = false;
+    tourRunning = false;
+    tourCardEl.hidden = true;
+    document.querySelectorAll('.tour-hit').forEach((el) => el.classList.remove('tour-hit'));
+    $('#stages').setAttribute('aria-label', 'Live check progress');
+    $('#calib').open = tour.calibWasOpen;
+    tourShowOverview();
+    setSheet('peek');
+    tourPauseBtn.hidden = false;
+    tourNextBtn.hidden = false;
+    tourEndBox.hidden = true;
+  }
+  function tourCloseStay() {
+    tour.seq += 1;
+    tour.active = false;
+    tour.paused = false;
+    tour.ended = false;
+    tourRunning = false;
+    tourCardEl.hidden = true;
+    document.querySelectorAll('.tour-hit').forEach((el) => el.classList.remove('tour-hit'));
+    $('#stages').setAttribute('aria-label', 'Live check progress');
+    tourShowCheck();
+    $('#clip').focus();
+  }
+  $('#tour-btn').addEventListener('click', startTour);
+  tourPauseBtn.addEventListener('click', () => tourSetPaused(!tour.paused));
+  tourNextBtn.addEventListener('click', tourNext);
+  $('#tour-close').addEventListener('click', tourCloseFull);
+  $('#tour-replay').addEventListener('click', startTour);
+  $('#tour-try').addEventListener('click', tourCloseStay);
+  document.addEventListener('click', (e) => {  // a click elsewhere pauses, so a judge can explore
+    if (!tour.active || tour.paused || tour.ended || !e.isTrusted) return;
+    if (tourCardEl.contains(e.target)) return;
+    tourSetPaused(true);
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (!tour.active) return;
+    if (e.key === 'Escape') { e.preventDefault(); tourCloseFull(); return; }
+    if (tour.ended) return;
+    if (e.target.tagName === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (e.key === ' ' && e.target.tagName !== 'BUTTON') { e.preventDefault(); tourSetPaused(!tour.paused); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); tourNext(); }
+  });
+  function maybeTour(boot) {
+    if (location.hash !== '#tour') return;
+    Promise.race([boot, new Promise((r) => setTimeout(r, 2000))]).then(() => startTour());
+  }
+
   // ------------------------------------------------------------------ start
   layout();
   centreOn(L.latLng(CENTRE), 16);
-  loadTowing(500);
-  loadStation();
+  const bootData = Promise.allSettled([loadTowing(500), loadStation()]);
   if (params.get('check') === '1' || params.get('sample')) enterCheck();
   if (params.get('sample')) runSample(false, crosshairLatLng());
   if (params.get('open') === '1') setSheet('half');
+  maybeTour(bootData);
 })();

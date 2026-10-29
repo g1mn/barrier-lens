@@ -23,6 +23,7 @@
       <p class="tagline">Does the chair fit past it?</p>
     </div>
   </div>
+  <button type="button" class="btn small tour-btn" id="tour-btn" aria-label="1-minute tour">▶ <span class="tour-full">1-minute tour</span><span class="tour-short">Tour</span></button>
   <button type="button" class="icon-btn" id="theme-toggle" aria-pressed="true" aria-label="Dark theme on. Switch to light theme">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-moon" d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/><g class="i-sun"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></svg>
   </button>
@@ -196,6 +197,23 @@
 
         <button type="button" class="btn ghost" id="back-btn">Back to the map overview</button>
       </div>
+    </div>
+  </section>
+
+  <section class="tour-card" id="tour-card" hidden tabindex="-1" role="region" aria-labelledby="tour-title">
+    <div class="tour-top">
+      <h2 id="tour-title">1-minute tour</h2>
+      <span class="tour-progress" id="tour-progress">1 / 7</span>
+    </div>
+    <p class="tour-text" id="tour-text" aria-live="polite"></p>
+    <div class="tour-controls">
+      <button type="button" class="btn small" id="tour-pause" aria-pressed="false">⏸ Pause</button>
+      <button type="button" class="btn small" id="tour-next">Next →</button>
+      <button type="button" class="btn small ghost" id="tour-close">✕ Close</button>
+    </div>
+    <div class="tour-controls" id="tour-end" hidden>
+      <button type="button" class="btn small primary" id="tour-replay">↺ Replay tour</button>
+      <button type="button" class="btn small" id="tour-try">Try your own clip</button>
     </div>
   </section>
 </main>
