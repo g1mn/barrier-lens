@@ -330,5 +330,11 @@
  "A closed sidewalk (Pexels stock clip, filmed elsewhere; the map pin is illustrative): Muse Spark reads the SIDEWALK CLOSED sign, so the verdict is blocked whatever the geometry measured.": "Trotoar yang ditutup (klip stok Pexels, direkam di tempat lain; pin di peta hanya ilustrasi): Muse Spark membaca papan SIDEWALK CLOSED, jadi hasilnya Terhalang, apa pun hasil ukur geometri.",
  "A sidewalk closed barricade stands across the path with cones and work equipment beyond.": "Barikade penutup trotoar berdiri melintang di jalur, dengan kerucut lalu lintas dan peralatan kerja di baliknya.",
  "A sidewalk closed sign on a stand sits in the walking path facing the camera.": "Papan tanda penutupan trotoar di atas penyangga berada di jalur pejalan kaki, menghadap kamera.",
- "Traffic cones line the sidewalk around the work area beyond the sign.": "Kerucut lalu lintas berjajar di trotoar di sekitar area kerja di balik papan tanda."
+ "Traffic cones line the sidewalk around the work area beyond the sign.": "Kerucut lalu lintas berjajar di trotoar di sekitar area kerja di balik papan tanda.",
+ "What it does": "Fiturnya",
+ "Ten seconds of video, a measured answer": "Video sepuluh detik, jawaban yang terukur",
+ "Measured against your own wheelchair": "Diukur untuk kursi roda Anda sendiri",
+ "Every answer shows its error": "Setiap jawaban menyertakan rentang galatnya",
+ "No model ever guesses a distance": "Tidak ada model yang menebak jarak",
+ "In ten languages": "Dalam sepuluh bahasa"
 }

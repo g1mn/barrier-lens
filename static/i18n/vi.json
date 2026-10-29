@@ -330,5 +330,11 @@
  "A closed sidewalk (Pexels stock clip, filmed elsewhere; the map pin is illustrative): Muse Spark reads the SIDEWALK CLOSED sign, so the verdict is blocked whatever the geometry measured.": "Một vỉa hè bị đóng (clip có sẵn từ Pexels, quay ở nơi khác; ghim trên bản đồ chỉ mang tính minh họa): Muse Spark đọc được biển SIDEWALK CLOSED (vỉa hè đóng), nên kết luận là “Bị chặn” bất kể hình học đo được bao nhiêu.",
  "A sidewalk closed barricade stands across the path with cones and work equipment beyond.": "Một rào chắn báo vỉa hè đóng đứng chắn ngang lối đi, phía sau có cọc tiêu và thiết bị thi công.",
  "A sidewalk closed sign on a stand sits in the walking path facing the camera.": "Một biển báo vỉa hè đóng trên giá đứng nằm giữa lối đi bộ, quay về phía camera.",
- "Traffic cones line the sidewalk around the work area beyond the sign.": "Các cọc tiêu xếp dọc vỉa hè quanh khu vực thi công phía sau biển báo."
+ "Traffic cones line the sidewalk around the work area beyond the sign.": "Các cọc tiêu xếp dọc vỉa hè quanh khu vực thi công phía sau biển báo.",
+ "What it does": "Tính năng",
+ "Ten seconds of video, a measured answer": "Mười giây video, một câu trả lời được đo",
+ "Measured against your own wheelchair": "Đo theo chính xe lăn của bạn",
+ "Every answer shows its error": "Mỗi câu trả lời đều kèm sai số",
+ "No model ever guesses a distance": "Không mô hình nào đoán khoảng cách",
+ "In ten languages": "Có mười ngôn ngữ"
 }

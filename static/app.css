@@ -448,6 +448,15 @@ input[type="file"]::file-selector-button {
 .iv-title { margin: 0; font: 800 clamp(1.3rem, 5vw, 2rem)/1.15 var(--font); color: #fff; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }
 .iv-title b { color: var(--accent); font-variant-numeric: tabular-nums; }
 .iv-sub { margin: 8px 0 0; font: 500 clamp(.88rem, 2.4vw, 1rem)/1.45 var(--font); color: rgb(255 255 255 / .82); word-break: keep-all; text-wrap: pretty; }
+.iv-feats { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.iv-feats li {
+  display: flex; align-items: center; gap: 10px; opacity: 0; will-change: opacity, transform;
+  font: 600 clamp(.88rem, 2.4vw, 1rem)/1.35 var(--font); color: rgb(255 255 255 / .9); word-break: keep-all;
+}
+.iv-feats svg {
+  flex: none; width: 28px; height: 28px; padding: 5px; box-sizing: border-box; border-radius: 8px;
+  background: rgb(255 210 63 / .16); color: var(--accent); fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
 @media (min-width: 900px) {
   .iv-heads { left: 32px; right: auto; top: 28px; width: 384px; }
   .iv-sub { font-size: 1.02rem; }

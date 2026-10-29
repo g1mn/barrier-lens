@@ -330,5 +330,11 @@
  "A closed sidewalk (Pexels stock clip, filmed elsewhere; the map pin is illustrative): Muse Spark reads the SIDEWALK CLOSED sign, so the verdict is blocked whatever the geometry measured.": "Una acera cerrada (clip de archivo de Pexels, grabado en otro lugar; el marcador del mapa es ilustrativo): Muse Spark lee el cartel «SIDEWALK CLOSED», así que el veredicto es «Bloqueado», midiera lo que midiera la geometría.",
  "A sidewalk closed barricade stands across the path with cones and work equipment beyond.": "Una barricada de «acera cerrada» cruza el paso, con conos y equipo de obra más allá.",
  "A sidewalk closed sign on a stand sits in the walking path facing the camera.": "Un cartel de «acera cerrada» sobre un soporte está en el paso peatonal, de cara a la cámara.",
- "Traffic cones line the sidewalk around the work area beyond the sign.": "Conos de tráfico bordean la acera alrededor de la zona de obras, más allá del cartel."
+ "Traffic cones line the sidewalk around the work area beyond the sign.": "Conos de tráfico bordean la acera alrededor de la zona de obras, más allá del cartel.",
+ "What it does": "Qué hace",
+ "Ten seconds of video, a measured answer": "Diez segundos de vídeo, una respuesta medida",
+ "Measured against your own wheelchair": "Medido para tu propia silla de ruedas",
+ "Every answer shows its error": "Cada respuesta muestra su margen de error",
+ "No model ever guesses a distance": "Ningún modelo adivina una distancia",
+ "In ten languages": "En diez idiomas"
 }

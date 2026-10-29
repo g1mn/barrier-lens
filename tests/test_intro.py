@@ -31,8 +31,16 @@ def test_intro_behaviour_hooks():
               "intro_at", "projection: { type: 'globe' }", "tile.openstreetmap.org", "map.getZoom() - 1",
               "zoomPath", "monotone", "redraw()", "intro-on", "/static/demo/intro-corridor.json",
               "requestAnimationFrame", "devicePixelRatio", "tiles.openfreemap.org/styles/liberty", "L.maplibreGL",
-              "base.sources.openmaptiles", "fadeIn", "nameField"):
+              "sources.openmaptiles.url", "fadeIn", "nameField", "/static/vendor/korea-10m.json", "warmTiles",
+              "lineMetrics: true", "iv-feats", "dive://", "LADDER"):
         assert s in JS, f"{s} missing from intro code"
+
+
+def test_korea_outline_is_the_detailed_one():
+    k = json.loads((ROOT / "static" / "vendor" / "korea-10m.json").read_text())
+    assert k["properties"]["name"] == "South Korea" and k["geometry"]["type"] == "MultiPolygon"
+    assert sum(len(r) for p in k["geometry"]["coordinates"] for r in p) > 2000  # 1:10m, not the 1:110m blob
+    assert "korea-10m.json" in (ROOT / "static" / "vendor" / "README.txt").read_text()
 
 
 def test_intro_assets_match_the_recorded_run():

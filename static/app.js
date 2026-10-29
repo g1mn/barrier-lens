@@ -68,6 +68,8 @@
       });
       return st;
     });
+  const tileUrl = baseStyle.then((s) => fetch(s.sources.openmaptiles.url)).then((r) => r.json()).then((j) => j.tiles[0]);
+  tileUrl.catch(() => {});  // only the intro's dive uses it
   baseStyle.then((style) => {
     if (!L.maplibreGL) throw new Error('no MapLibre');
     L.maplibreGL({ style }).addTo(map);
@@ -1056,21 +1058,29 @@
     const AT = params.has('intro_at') ? Number(params.get('intro_at')) || 0 : null;
     // Timeline in seconds. Stage i of the rail runs from RAIL[i] to RAIL[i + 1].
     const T = {
-      dive: 3.8, swap: [3.8, 4.15],
-      rings: 4.0, ringDur: 1.0, ringGap: 0.22, exits: 4.75,
-      cam: 5.7, play: 5.95, blur: 6.1, spark: [7.35, 8.8], freeze: 8.95,
-      sam: [9.05, 10.1], measure: [10.1, 11.35], verdict: 11.35, explain: [11.6, 12.55],
-      handoff: 12.8, end: 13.4,
+      dive: 5.4, swap: [5.4, 5.75], about: 2.3,
+      rings: 5.6, ringDur: 1.0, ringGap: 0.22, exits: 6.35,
+      cam: 7.3, play: 7.55, blur: 7.7, spark: [8.95, 10.4], freeze: 10.55,
+      sam: [10.65, 11.7], measure: [11.7, 12.95], verdict: 12.95, explain: [13.2, 14.15],
+      handoff: 14.4, end: 15.0,
     };
     // zoom over the dive (seconds, zoom): the globe turns to East Asia, South Korea fills, Seoul, then a slow
     // landing. A monotone cubic through these keys keeps the speed continuous; the centre follows the zoom
     // along the van Wijk curve, so pan and zoom never stop and restart.
     let skipOnce = false;  // a language switch reloads the page; the intro does not replay for it
     try { skipOnce = sessionStorage.getItem('bl-intro-skip-once') === '1'; sessionStorage.removeItem('bl-intro-skip-once'); } catch { /* private mode */ }
-    const ZKEYS = [[0, 0], [1.35, 2.6], [2.2, 5.4], [2.85, 9.8], [T.dive, 15]];  // first and last zoom set at start
+    const ZKEYS = [[0, 0], [1.7, 2.6], [3.2, 5.4], [4.1, 9.8], [T.dive, 15]];  // first and last zoom set at start
     const RAIL = [T.blur, T.spark[0], T.sam[0], T.measure[0], T.verdict, T.explain[1]];
+    // what the product does, one line at a time during the dive (icons: ruler, error bar, shield, globe)
+    const FEATS = [
+      ['<path d="M3 17 17 3l4 4L7 21zM7 13l2 2m1-5 2 2m1-5 2 2"/>', _('Measured against your own wheelchair')],
+      ['<path d="M4 12h16M4 8v8m16-8v8m-8-6v4"/>', _('Every answer shows its error')],
+      ['<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6zm-3 9 2 2 4-4"/>', _('No model ever guesses a distance')],
+      ['<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18m0-18c-3 3-3 15 0 18"/>', _('In ten languages')],
+    ];
     const GATE = [CENTRE[1], CENTRE[0]];
     const SEOUL = [126.9780, 37.5665];
+    const KOREA_TAG = [129.6, 35.7];  // off the south-east coast, clear of the Seoul label
     const START = [8, 18];  // the globe opens on Europe and Africa and turns east
     const clamp01 = (x) => Math.min(1, Math.max(0, x));
     const seg = (t, a, b) => clamp01((t - a) / (b - a));
@@ -1108,7 +1118,7 @@
       };
     }
 
-    // The base map's own layers fade in from zoom 4.5 to 7 over the drawn globe, so the dive ends on the same map.
+    // The base map's own layers fade in from zoom 6 to 8.5 over the drawn globe, so the dive ends on the same map.
     const OPACITY = { fill: ['fill-opacity'], line: ['line-opacity'], symbol: ['text-opacity', 'icon-opacity'],
       'fill-extrusion': ['fill-extrusion-opacity'], circle: ['circle-opacity'], raster: ['raster-opacity'], background: ['background-opacity'] };
     function fadeIn(l) {
@@ -1116,28 +1126,35 @@
         const op = ['interpolate', ['linear'], ['zoom'], 10.5, 0, 11.5, 1];
         return { ...l, paint: { ...l.paint, 'text-opacity': op, 'icon-opacity': op } };
       }
-      if ((l.minzoom || 0) >= 7) return l;
+      if ((l.minzoom || 0) >= 8.5) return l;
       const paint = { ...l.paint };
       for (const p of OPACITY[l.type] || []) {
         const v = typeof paint[p] === 'number' ? paint[p] : 1;
-        paint[p] = ['interpolate', ['linear'], ['zoom'], 4.5, 0, 7, v];
+        paint[p] = ['interpolate', ['linear'], ['zoom'], 6, 0, 8.5, v];
       }
-      return { ...l, minzoom: Math.max(l.minzoom || 0, 4.5), paint };
+      return { ...l, minzoom: Math.max(l.minzoom || 0, 6), paint };
+    }
+    // the coast's tracing stroke: each line drawn up to p (0..1) of its length, with a white pen tip
+    function trace(p, c) {
+      const none = 'rgba(0,0,0,0)', g = (...stops) => ['interpolate', ['linear'], ['line-progress'], ...stops];
+      if (p <= 0) return g(0, none, 1, none);
+      if (p >= 1) return g(0, c, 1, c);
+      const a = Math.max(p - 0.05, 1e-4), b = Math.max(p, a + 1e-4), e = Math.min(b + 0.002, 1);
+      return g(0, c, a, c, b, '#fff', e, none, ...(e < 1 ? [1, none] : []));
     }
     function makeGlobe(topo, start, base) {
       if (!window.maplibregl || !window.topojson || !topo) return null;
-      let land, korea;
-      try {
-        land = window.topojson.feature(topo[0], topo[0].objects.land);
-        korea = window.topojson.feature(topo[1], topo[1].objects.countries).features
-          .find((f) => f.properties && f.properties.name === 'South Korea');
-      } catch { return null; }
+      let land;
+      try { land = window.topojson.feature(topo[0], topo[0].objects.land); } catch { return null; }
+      const korea = topo[1];  // Natural Earth 1:10m: the coast and islands still hold at the zoom the base map takes over
+      // every coast and island as its own line, so the tracing stroke (line-progress) runs round each at once
+      const coasts = { type: 'FeatureCollection', features: korea.geometry.coordinates.flat().map((ring) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: ring } })) };
       const lines = [];
       for (let lon = -180; lon < 180; lon += 15) lines.push(Array.from({ length: 81 }, (_, i) => [lon, -80 + i * 2]));
       for (let lat = -75; lat <= 75; lat += 15) lines.push(Array.from({ length: 181 }, (_, i) => [-180 + i * 2, lat]));
       const op = (z) => ['interpolate', ['linear'], ['zoom'], ...z];
       try {
-        return new window.maplibregl.Map({
+        const globe = new window.maplibregl.Map({
           container: globeHost, interactive: false, attributionControl: false, fadeDuration: 0,
           center: [start.lon, start.lat], zoom: start.zoom,
           style: {
@@ -1147,21 +1164,30 @@
             sky: { 'atmosphere-blend': op([0, 1, 4, 1, 6.5, 0]) },
             sources: {
               land: { type: 'geojson', data: land },
-              korea: { type: 'geojson', data: korea || { type: 'FeatureCollection', features: [] } },
+              korea: { type: 'geojson', data: korea },
+              coasts: { type: 'geojson', data: coasts, lineMetrics: true },
               grat: { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates: lines } } },
               // the same vector tiles as the Leaflet map, at the same scale (MapLibre zoom 15 = Leaflet zoom 16)
-              ...(base ? { openmaptiles: base.sources.openmaptiles } : {}),
+              // the ladder of zooms (warmTiles); nothing below z6, where the base map has not started to fade in
+              ...(base ? { openmaptiles: { type: 'vector', tiles: ['dive://{z}/{x}/{y}'], minzoom: 6, maxzoom: 14 } } : {}),
             },
             layers: [
               { id: 'ocean', type: 'background', paint: { 'background-color': cssVar('--globe-ocean') } },
-              { id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': cssVar('--globe-land') } },
+              // the rest of the land dims as South Korea lights up
+              { id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': cssVar('--globe-land'), 'fill-opacity': op([2.6, 1, 3.6, 0.6]) } },
               { id: 'grat', type: 'line', source: 'grat', maxzoom: 5, paint: { 'line-color': cssVar('--globe-grat'), 'line-width': 0.8 } },
               ...(base ? base.layers.filter((l) => l.source === 'openmaptiles' || l.type === 'background').map(fadeIn) : []),
-              { id: 'korea', type: 'fill', source: 'korea', maxzoom: 8, paint: { 'fill-color': cssVar('--accent'), 'fill-opacity': op([1.6, 0, 2.8, 0.9, 5.5, 0.85, 7.5, 0]) } },
-              { id: 'korea-edge', type: 'line', source: 'korea', maxzoom: 8, paint: { 'line-color': cssVar('--accent-ink'), 'line-width': 1, 'line-opacity': op([1.6, 0, 2.8, 0.5, 7.5, 0]) } },
+              // South Korea: the coast is traced (render() moves the line-gradient), then it glows and fills
+              { id: 'korea-glow', type: 'line', source: 'coasts', maxzoom: 8, layout: { 'line-join': 'round' },
+                paint: { 'line-color': cssVar('--accent'), 'line-width': op([2.5, 6, 6, 18]), 'line-blur': op([2.5, 5, 6, 14]), 'line-opacity': op([3.2, 0, 3.8, 0.75, 6, 0.5, 7.5, 0]) } },
+              { id: 'korea', type: 'fill', source: 'korea', maxzoom: 8, paint: { 'fill-color': cssVar('--accent'), 'fill-opacity': op([3.3, 0, 3.9, 0.9, 5, 0.75, 6.5, 0.3, 7.5, 0]) } },
+              { id: 'korea-edge', type: 'line', source: 'coasts', maxzoom: 8, layout: { 'line-join': 'round', 'line-cap': 'round' },
+                paint: { 'line-gradient': trace(0, cssVar('--accent')), 'line-width': op([2, 1.6, 6, 2.6]), 'line-opacity': op([6, 1, 7.5, 0]) } },
             ],
           },
         });
+        globe.on('error', () => {});  // off-ladder tiles are refused on purpose; without a listener each one is logged
+        return globe;
       } catch { return null; }  // no WebGL
     }
 
@@ -1181,7 +1207,9 @@
     function buildText(st) {
       const d = st.d, tow = st.tow;
       const H = [
-        [0.2, T.dive + 0.1, 'Barrier Lens', esc(_('Does the chair fit past it?')), esc(_('A sidewalk check for wheelchair users, built on Meta models'))],
+        [0.2, T.about + 0.1, 'Barrier Lens', esc(_('Does the chair fit past it?')), esc(_('A sidewalk check for wheelchair users, built on Meta models'))],
+        [T.about, T.dive + 0.1, _('What it does'), esc(_('Ten seconds of video, a measured answer')), '',
+          `<ul class="iv-feats">${FEATS.map(([icon, text]) => `<li><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg>${esc(text)}</li>`).join('')}</ul>`],
         tow
           ? [T.rings + 0.05, T.cam - 0.05, _('Gwanghwamun · Seoul Open Data'), _('{count} e-scooter towing reports', { count: `<b data-count="${tow.n1000}">0</b>` }),
             `${esc(_('within 1 km of the gate: {n500} within 500 m, {n300} within 300 m', { n500: num(tow.n500), n300: num(tow.n300) }))}<br>${esc(tow.span)}`]
@@ -1192,8 +1220,9 @@
         [T.verdict + 0.05, T.handoff, _('Step 3 · the answer, with its error'), esc(_('Passes: about {n} cm', { n: num(d.gap_cm) })),
           esc(_('95% band {lo}–{hi} cm · a {chair} cm chair needs {need} cm', { lo: num(d.band_cm[0]), hi: num(d.band_cm[1]), chair: num(d.chair_cm), need: num(d.needed_cm) }))],
       ];
-      heads.innerHTML = H.map(([, , k, title, sub]) => `<div class="iv-head"><p class="iv-kicker">${esc(k)}</p><h2 class="iv-title">${title}</h2>${sub ? `<p class="iv-sub">${sub}</p>` : ''}</div>`).join('');
+      heads.innerHTML = H.map(([, , k, title, sub, more = '']) => `<div class="iv-head"><p class="iv-kicker">${esc(k)}</p><h2 class="iv-title">${title}</h2>${sub ? `<p class="iv-sub">${sub}</p>` : ''}${more}</div>`).join('');
       st.heads = H.map(([a, b], i) => ({ a, b, el: heads.children[i], count: heads.children[i].querySelector('[data-count]') }));
+      st.feats = [...heads.querySelectorAll('.iv-feats li')];
       const tags = [[T.blur + 0.15, _('{n} faces blurred · YuNet', { n: `<b>${num(d.blur.faces)}</b>` }), 'blur'],
         [T.spark[0] + 0.35, _('Muse Spark: path {state}', { state: `<b>${esc(PATH_STATE[d.path] || d.path)}</b>` }), 'spark'],
         ...d.barriers.map((b, i) => [T.spark[0] + 0.65 + 0.3 * i, esc(tr(b)), 'spark'])];
@@ -1269,6 +1298,22 @@
       const out = 1 - seg(t, T.handoff, T.handoff + 0.45);
       if (view && st.globe) {
         const p = st.globe.project(SEOUL);
+        const ping = seg(view.zoom, 3.5, 3.9) * (1 - seg(view.zoom, 4.8, 5.4));  // South Korea lit: a sonar ping from Seoul
+        if (ping > 0) {
+          const R = 0.16 * Math.min(st.W, st.H);
+          ctx.save(); ctx.strokeStyle = st.accent; ctx.lineWidth = 2;
+          for (let k = 0; k < 3; k++) {
+            const ph = (t / 1.2 + k / 3) % 1;
+            ctx.globalAlpha = ping * (1 - ph) * 0.8;
+            ctx.beginPath(); ctx.arc(p.x, p.y, 6 + R * outCubic(ph), 0, 2 * Math.PI); ctx.stroke();
+          }
+          ctx.restore();
+        }
+        const ka = seg(view.zoom, 3.4, 3.8) * (1 - seg(view.zoom, 4.5, 4.9));  // our label leaves as the map's own fades in
+        if (ka > 0) {
+          const k = st.globe.project(KOREA_TAG);
+          ctx.save(); ctx.globalAlpha = ka; pill(ctx, _('South Korea'), k.x + 10, k.y, '650 13px system-ui, sans-serif', 'left'); ctx.restore();
+        }
         dot(ctx, p, _('Seoul'), seg(view.zoom, 4, 4.8) * (1 - seg(view.zoom, 9.5, 10.5)), t, st.accent, st.ink);
       }
       if (t >= T.rings) {
@@ -1399,14 +1444,20 @@
       while (i < tb.length - 1 && tb[i][1] < z) i++;
       const [u0, z0] = tb[i - 1], [u1, z1] = tb[i];
       const [x, y] = st.path(z1 > z0 ? u0 + ((z - z0) / (z1 - z0)) * (u1 - u0) : u1);
-      return { lon: lonOf(x), lat: latOf(y), zoom: z };
+      // the swoop: over South Korea the camera tilts toward the horizon and turns; it is level again before the base
+      // map fades in (zoom 6), so a tilted view never asks for far-off tiles, and the turn unwinds on the way down
+      const tilt = inOut(seg(t, 1.9, 2.6)) * (1 - inOut(seg(t, 2.95, 3.45)));
+      const turn = inOut(seg(t, 1.8, 2.7)) * (1 - inOut(seg(t, 3.1, 4.6)));
+      return { lon: lonOf(x), lat: latOf(y), zoom: z, pitch: 55 * tilt, bearing: -32 * turn };
     }
 
     function render(st, t, live) {
       overlay.dataset.t = t.toFixed(2);  // the clock, for checks and screen captures
       const view = st.globe && t < T.swap[1] ? camera(st, t) : null;
       if (view) {
-        st.globe.jumpTo({ center: [view.lon, view.lat], zoom: view.zoom });
+        st.globe.jumpTo({ center: [view.lon, view.lat], zoom: view.zoom, pitch: view.pitch, bearing: view.bearing });
+        const p = seg(view.zoom, 2.5, 3.6);
+        if (p !== st.traced) { st.traced = p; st.globe.setPaintProperty('korea-edge', 'line-gradient', trace(p, st.accent)); }
         st.globe.redraw();  // draw now, so the dots on the canvas above stay on the same frame
       }
       const gOut = st.hadGlobe ? 1 - seg(t, T.swap[0], T.swap[1]) : 0;
@@ -1421,6 +1472,12 @@
         h.el.style.opacity = o;
         h.el.style.transform = `translateY(${(1 - outCubic(seg(t, h.a, h.a + 0.45))) * 16}px)`;
         if (h.count) h.count.textContent = num(Number(h.count.dataset.count) * outCubic(seg(t, T.rings + 0.1, T.rings + 1.25)));
+      });
+      st.feats.forEach((li, i) => {
+        const s = T.about + 0.3 + 0.35 * i;
+        li.style.opacity = seg(t, s, s + 0.3);
+        li.hidden = t < s;  // the card grows a line at a time
+        li.style.transform = `translateX(${(1 - outCubic(seg(t, s, s + 0.4))) * -12}px)`;
       });
       crumbs.style.opacity = st.hadGlobe ? fadeIO(t, 0.15, T.swap[1] + 0.1) : 0;
       let lastOn = -1;
@@ -1474,6 +1531,47 @@
       if (t >= T.cam) drawCam(st, t);
     }
 
+    // The dive passes through about 9.5 MB of OpenFreeMap tiles in central Seoul, more than a phone connection fetches
+    // in its five seconds, and tiles that land late pop in at random. So the base map is drawn only at a ladder of
+    // zooms, fetched before the dive starts (about 1.9 MB; z14 is the landing view the page's own map loads anyway):
+    // MapLibre asks for dive://z/x/y, a ladder tile comes from the network (the HTTP cache by then; these tiles never
+    // change under one URL), any other zoom is refused and MapLibre draws the ladder tile below it, overzoomed.
+    const LADDER = [6, 9, 12, 14];
+    let diveProtocol = false;
+    function warmTiles(st, url) {
+      if (!diveProtocol && window.maplibregl && maplibregl.addProtocol) {
+        diveProtocol = true;
+        maplibregl.addProtocol('dive', async ({ url: u }, abort) => {
+          const [z, x, y] = u.slice('dive://'.length).split('/');
+          if (!LADDER.includes(Number(z))) throw new Error('not on the ladder');  // MapLibre falls back to the parent
+          const r = await fetch((await tileUrl).replace('{z}', z).replace('{x}', x).replace('{y}', y), { signal: abort.signal });
+          if (!r.ok) throw new Error(`tile ${z}/${x}/${y}: HTTP ${r.status}`);
+          return { data: await r.arrayBuffer() };
+        });
+      }
+      const keys = new Set();
+      for (let i = 0; i <= 240; i++) {
+        const v = camera(st, (i / 240) * T.dive);
+        const z = Math.min(14, Math.floor(v.zoom)), n = 2 ** z, k = 512 * 2 ** (v.zoom - z);  // k: a tile's size on screen
+        if (!LADDER.includes(z)) continue;
+        const b = (v.bearing * Math.PI) / 180, c = Math.abs(Math.cos(b)), s2 = Math.abs(Math.sin(b));
+        const hx = (st.W * c + st.H * s2) / 2 / k, hy = (st.W * s2 + st.H * c) / 2 / k;  // the turned view's bounding box
+        const cx = mx(v.lon) * n, cy = my(v.lat) * n;
+        for (let x = Math.floor(cx - hx); x <= Math.floor(cx + hx); x++) {
+          for (let y = Math.floor(cy - hy); y <= Math.floor(cy + hy); y++) keys.add(`${z}/${x}/${y}`);
+        }
+      }
+      const pool = (keyList) => {  // six at a time, in order
+        const urls = keyList.map((key) => { const [z, x, y] = key.split('/'); return url.replace('{z}', z).replace('{x}', x).replace('{y}', y); });
+        let i = 0;
+        const next = () => (i < urls.length ? fetch(urls[i++]).then((r) => r.arrayBuffer()).catch(() => null).then(next) : null);
+        return Promise.all(Array.from({ length: 6 }, next));
+      };
+      const low = [...keys].filter((k) => Number(k.split('/')[0]) <= 9);
+      const first = pool(low);  // z6 and z9: the dive starts when these are in
+      return { first, all: first.then(() => pool([...keys].filter((k) => !low.includes(k)))) };
+    }
+
     function finish(st) {
       if (st.done) return;
       st.done = true;
@@ -1508,6 +1606,23 @@
       });
     }
 
+    // the camera path for this window: van Wijk & Nuij from the globe to the map's view, the zoom keyed to time
+    function plan(st) {
+      const r = overlay.getBoundingClientRect();
+      st.W = r.width; st.H = r.height;
+      const c = map.getCenter();
+      const end = [mx(c.lng), my(c.lat), st.W / (512 * 2 ** (map.getZoom() - 1))];
+      const z0 = Math.log2((0.36 * Math.min(st.W, st.H) * 2 * Math.PI) / 512);
+      st.path = zoomPath([mx(START[0]), my(START[1]), st.W / (512 * 2 ** z0)], end);
+      st.uz = [];
+      for (let i = 0, top = -Infinity; i <= 400; i++) {
+        top = Math.max(top, Math.log2(st.W / (512 * st.path(i / 400)[2])));
+        st.uz.push([i / 400, top]);
+      }
+      const zEnd = map.getZoom() - 1;
+      st.zoomAt = monotone(ZKEYS.map(([t, z], i) => [t, i === 0 ? z0 : i === ZKEYS.length - 1 ? zEnd : z]));
+    }
+
     function playAnimated() {
       return new Promise((resolve) => {
         const st = { done: false, pins: [], resolve, played: false, globe: null, raf: 0 };
@@ -1518,11 +1633,16 @@
         heads.innerHTML = '';
         globeHost.style.opacity = 1;
         st.accent = cssVar('--accent'); st.ink = cssVar('--accent-ink'); st.towColour = cssVar('--tow');
+        plan(st);
+        const warm = tileUrl.then((url) => warmTiles(st, url)).catch(() => null);  // first: the dive needs them first
         video.muted = true;
-        video.src = '/static/demo/intro-corridor.mp4';
-        video.preload = 'auto';
+        within(warm.then((w) => w && w.first), 2500).then(() => {  // the clip plays seconds later; it waits its turn
+          if (st.done) return;
+          video.src = '/static/demo/intro-corridor.mp4';
+          video.preload = 'auto';
+        });
         still.src = '/static/demo/intro-corridor-77.jpg';
-        const topo = Promise.all([getJson('/static/vendor/land-110m.json'), getJson('/static/vendor/countries-110m.json')]).catch(() => null);
+        const topo = Promise.all([getJson('/static/vendor/land-110m.json'), getJson('/static/vendor/korea-10m.json')]).catch(() => null);
         Promise.all([getJson('/static/demo/intro-corridor.json'), within(loadTowing().catch(() => null), 2500), within(topo, 2500),
           within(baseStyle.catch(() => null), 2500)])
           .then(([d, tow, topoJson, base]) => {
@@ -1530,17 +1650,6 @@
             st.d = d; st.tow = tow;
             buildText(st);
             measure(st);
-            const c = map.getCenter();
-            const end = [mx(c.lng), my(c.lat), st.W / (512 * 2 ** (map.getZoom() - 1))];
-            const z0 = Math.log2((0.36 * Math.min(st.W, st.H) * 2 * Math.PI) / 512);
-            st.path = zoomPath([mx(START[0]), my(START[1]), st.W / (512 * 2 ** z0)], end);
-            st.uz = [];
-            for (let i = 0, top = -Infinity; i <= 400; i++) {
-              top = Math.max(top, Math.log2(st.W / (512 * st.path(i / 400)[2])));
-              st.uz.push([i / 400, top]);
-            }
-            const zEnd = map.getZoom() - 1;
-            st.zoomAt = monotone(ZKEYS.map(([t, z], i) => [t, i === 0 ? z0 : i === ZKEYS.length - 1 ? zEnd : z]));
             // when each crumb lights up, read off the camera path
             const when = [() => true, (v) => v.lon > 70, (v) => v.zoom > 3.6, (v) => v.zoom > 7.2, (v) => v.zoom > 11.2];
             st.crumbT = when.map(() => T.dive);
@@ -1552,7 +1661,7 @@
             const start = camera(st, 0);
             st.globe = topoJson ? makeGlobe(topoJson, start, base) : null;
             const ready = st.globe ? within(new Promise((r) => st.globe.once('load', r)), 2500) : Promise.resolve();
-            return ready.then((ok) => {
+            return Promise.all([ready, st.globe ? within(warm.then((w) => w && w.first), 2500) : null]).then(([ok]) => {
               if (st.done) return;
               if (st.globe && ok === null) { st.globe.remove(); st.globe = null; }  // style never loaded
               st.hadGlobe = !!st.globe;

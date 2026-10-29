@@ -330,5 +330,11 @@
  "A closed sidewalk (Pexels stock clip, filmed elsewhere; the map pin is illustrative): Muse Spark reads the SIDEWALK CLOSED sign, so the verdict is blocked whatever the geometry measured.": "막힌 보도(Pexels 스톡 영상, 다른 곳에서 촬영; 지도 핀 위치는 예시): Muse Spark가 SIDEWALK CLOSED(보도 폐쇄) 표지판을 읽어서, 기하 계산 결과와 상관없이 판정은 막힘이에요.",
  "A sidewalk closed barricade stands across the path with cones and work equipment beyond.": "‘보도 폐쇄’ 바리케이드가 길을 가로질러 서 있고, 그 너머에 라바콘과 작업 장비가 있어요.",
  "A sidewalk closed sign on a stand sits in the walking path facing the camera.": "받침대에 세운 ‘보도 폐쇄’ 표지판이 카메라를 향해 보행로에 놓여 있어요.",
- "Traffic cones line the sidewalk around the work area beyond the sign.": "표지판 너머 작업 구역 둘레로 라바콘이 보도를 따라 늘어서 있어요."
+ "Traffic cones line the sidewalk around the work area beyond the sign.": "표지판 너머 작업 구역 둘레로 라바콘이 보도를 따라 늘어서 있어요.",
+ "What it does": "하는 일",
+ "Ten seconds of video, a measured answer": "10초 영상으로 폭을 재서 답합니다",
+ "Measured against your own wheelchair": "내 휠체어 폭에 맞춰 판단",
+ "Every answer shows its error": "모든 답에 오차 범위 표시",
+ "No model ever guesses a distance": "모델은 거리를 짐작하지 않음",
+ "In ten languages": "10개 언어 지원"
 }

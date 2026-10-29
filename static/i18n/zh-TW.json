@@ -330,5 +330,11 @@
  "A closed sidewalk (Pexels stock clip, filmed elsewhere; the map pin is illustrative): Muse Spark reads the SIDEWALK CLOSED sign, so the verdict is blocked whatever the geometry measured.": "封閉的人行道（Pexels 素材影片，在其他地方拍攝；地圖圖釘僅供示意）：Muse Spark 讀到「SIDEWALK CLOSED」告示牌，因此無論幾何測得多少，判定都是「無法通行」。",
  "A sidewalk closed barricade stands across the path with cones and work equipment beyond.": "一個「人行道封閉」路障橫在通道上，後方有三角錐和施工設備。",
  "A sidewalk closed sign on a stand sits in the walking path facing the camera.": "一塊架在支架上的「人行道封閉」告示牌立在步行通道中，面向鏡頭。",
- "Traffic cones line the sidewalk around the work area beyond the sign.": "告示牌後方的施工區域周圍，人行道上排著三角錐。"
+ "Traffic cones line the sidewalk around the work area beyond the sign.": "告示牌後方的施工區域周圍，人行道上排著三角錐。",
+ "What it does": "功能",
+ "Ten seconds of video, a measured answer": "拍十秒影片，得到實測的答案",
+ "Measured against your own wheelchair": "依你自己的輪椅寬度判斷",
+ "Every answer shows its error": "每個答案都標出誤差",
+ "No model ever guesses a distance": "距離從不由模型猜測",
+ "In ten languages": "支援十種語言"
 }
