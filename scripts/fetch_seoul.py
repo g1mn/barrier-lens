@@ -1,4 +1,4 @@
-"""Fetch the Seoul open data the Yangjae Station demo needs and cache it under data/seoul/.
+"""Fetch the Seoul open data the Gwanghwamun & Gyeongbokgung demo needs and cache it under data/seoul/.
 
 Sources (Korea Open Government License Type 1 / 공공누리 1유형, see data/seoul/ATTRIBUTION.txt):
   aiTbAutoKickboard  OA-23057  e-scooter towing history (lot-number address only, no coordinates)
@@ -10,10 +10,10 @@ Geocoding goes through the VWorld address API during "build" only, one request a
 so just the 300 / 500 / 1000 m distance band of each address is written to disk.
 
 Steps (run in this order; towing resumes from its cache):
-  .venv/bin/python scripts/fetch_seoul.py towing           page the whole towing table once, keep Seocho-gu + Gangnam-gu
-  .venv/bin/python scripts/fetch_seoul.py station          Yangjae elevators, lifts and live status
-  .venv/bin/python scripts/fetch_seoul.py exits            exit / elevator positions from OpenStreetMap (one Overpass call)
-  .venv/bin/python scripts/fetch_seoul.py build            write data/seoul/towing-yangjae.json
+  .venv/bin/python scripts/fetch_seoul.py towing           page the whole towing table once, keep Jongno-gu + Jung-gu
+  .venv/bin/python scripts/fetch_seoul.py station          Gwanghwamun & Gyeongbokgung elevators, lifts and live status
+  .venv/bin/python scripts/fetch_seoul.py exits            exit / elevator positions from OpenStreetMap (one Overpass call per station)
+  .venv/bin/python scripts/fetch_seoul.py build            write data/seoul/towing-gwanghwamun.json
   .venv/bin/python scripts/fetch_seoul.py stats            counts only, no network
 Keys are read through app.config.key() and are never printed: every error message is redacted.
 """
@@ -33,22 +33,29 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from app.config import key  # noqa: E402
+from app.seoul import CENTRE as GATE, STATIONS  # noqa: E402  (positions from OpenStreetMap, ODbL)
 
 SEOUL_DIR = ROOT / "data" / "seoul"          # small, committed
 CACHE_DIR = ROOT / "data" / "cache" / "seoul"  # large, gitignored
 TOW_ROWS = CACHE_DIR / "towing-rows.jsonl"
 TOW_PROGRESS = CACHE_DIR / "towing-progress.jsonl"
-TOW_OUT = SEOUL_DIR / "towing-yangjae.json"
-STATION_OUT = SEOUL_DIR / "yangjae-station.json"
+TOW_OUT = SEOUL_DIR / "towing-gwanghwamun.json"
+STATION_OUT = SEOUL_DIR / "gwanghwamun-stations.json"
+EXITS_OUT = SEOUL_DIR / "gwanghwamun-exits-osm.json"
 
 SEOUL_BASE = "http://openapi.seoul.go.kr:8088"
 VWORLD_URL = "https://api.vworld.kr/req/address"
 PAGE = 1000            # Seoul Open API maximum rows per call
-KEEP_GU = {"서초구", "강남구"}
-# Only these get geocoded. OA-23057 addresses use the legal dong (법정동) 양재동, which is the area of
-# the two administrative dongs 양재1동 and 양재2동 around Yangjae Station. Neighbouring dongs inside
-# 1 km (도곡동, 서초동, 개포동) are deliberately left out to keep VWorld calls low.
-TARGET_DONGS = ("서울특별시 서초구 양재동",)
+KEEP_GU = {"종로구", "중구"}
+# Only these get geocoded: the legal dongs (법정동) within about 1 km of Gwanghwamun Gate.
+# Neighbouring dongs inside the circle are deliberately left out to keep VWorld calls low.
+_JONGNO = ("세종로", "사직동", "내자동", "적선동", "통의동", "창성동", "효자동", "궁정동", "신교동",
+           "청운동", "옥인동", "누상동", "누하동", "필운동", "체부동", "통인동", "내수동", "도렴동",
+           "당주동", "신문로1가", "신문로2가", "수송동", "중학동", "송현동", "사간동", "소격동",
+           "삼청동", "팔판동", "안국동", "화동", "견지동", "공평동", "청진동", "서린동", "종로1가",
+           "관훈동", "경운동")
+_JUNG = ("태평로1가", "무교동", "다동", "정동")
+TARGET_DONGS = tuple(f"서울특별시 종로구 {n}" for n in _JONGNO) + tuple(f"서울특별시 중구 {n}" for n in _JUNG)
 BUILD_RADIUS_M = 1000
 BANDS_M = (300, 500, 1000)  # written per address; anything beyond BUILD_RADIUS_M is dropped
 VWORLD_GAP_S = 1.5
@@ -196,36 +203,43 @@ def cmd_station(_args: argparse.Namespace) -> None:
     def nodes(rows: list[dict]) -> list[dict]:
         out = []
         for r in rows:
-            # OA-21212 names it "양재(서초구청)"; "양재시민의숲(매헌)" is a different station
-            if (r.get("SBWY_STN_NM") or "").strip() == "양재(서초구청)":
+            # OA-21212 names Gyeongbokgung "경복궁(정부서울청사)"; Gwanghwamun has no OA-21212 nodes
+            if (r.get("SBWY_STN_NM") or "").strip() == "경복궁(정부서울청사)":
                 lat, lon = point(r["NODE_WKT"])
                 out.append({"node_id": int(r["NODE_ID"]), "lat": round(lat, 7), "lon": round(lon, 7),
                             "station_code": r.get("SBWY_STN_CD"), "dong": r.get("EMD_NM")})
         return out
 
+    def live_key(stn_nm: str) -> str | None:
+        # OA-15994 STN_NM now comes without a line suffix ("경복궁"); older rows had one ("양재(3)")
+        for s in STATIONS:
+            if stn_nm == s["oa_name"] or stn_nm.startswith(s["oa_name"] + "("):
+                return s["key"]
+        return None
+
     elevators = nodes(elvtr_rows)
     lifts = nodes(lift_rows)
-    live = [{"name": r["ELVTR_NM"], "kind": r["ELVTR_SE"], "where": r["INSTL_PSTN"],
-             "floors": r["OPR_SEC"], "status": r["USE_YN"], "station": r["STN_NM"]}
-            for r in status_rows if (r.get("STN_NM") or "").startswith("양재(")]
-    pts = elevators + lifts
-    centre = ({"lat": round(sum(p["lat"] for p in pts) / len(pts), 7),
-               "lon": round(sum(p["lon"] for p in pts) / len(pts), 7),
-               "how": f"mean of {len(pts)} OA-21212/21211 nodes named 양재"} if pts else None)
+    live = []
+    for r in status_rows:
+        sk = live_key(r.get("STN_NM") or "")
+        if sk is not None:
+            live.append({"name": r["ELVTR_NM"], "kind": r["ELVTR_SE"], "where": r["INSTL_PSTN"],
+                         "floors": r["OPR_SEC"], "status": r["USE_YN"], "station": sk})
     out = {
-        "station": "양재 Yangjae (Line 3 / Shinbundang)",
+        "area": "Gwanghwamun & Gyeongbokgung",
         "fetched_at": fetched,
-        "centre": centre,
+        "centre": {"lat": GATE[0], "lon": GATE[1], "how": "Gwanghwamun Gate (OSM way 170199440)"},
+        "stations": [{"key": s["key"], "name": s["name"], "line": s["line"]} for s in STATIONS],
         "elevators_2020": elevators,
         "entrance_lifts_2020": lifts,
         "live_status": live,
         "counts": {"SeoulMetroFaciInfo_total": len(status_rows), "tbTraficElvtr_total": len(elvtr_rows),
                    "tbTraficEntrcLft_total": len(lift_rows)},
         "notes": [
-            "live_status comes from OA-15994 (Seoul Metro only). The Shinbundang line platform is run by a "
-            "different operator and is not in this feed: missing rows mean no data, not no elevator.",
-            "elevators_2020 / entrance_lifts_2020 are 2020 positions (OA-21212 / OA-21211) and do not say "
-            "which exit they serve.",
+            "live_status comes from OA-15994. Both stations are Seoul Metro lines"
+            " (Gyeongbokgung Line 3, Gwanghwamun Line 5), so both are in this feed.",
+            "elevators_2020 / entrance_lifts_2020 are 2020 positions (OA-21212 / OA-21211) for Gyeongbokgung"
+            " only and do not say which exit they serve.",
         ],
         "sources": ["OA-15994 SeoulMetroFaciInfo", "OA-21212 tbTraficElvtr", "OA-21211 tbTraficEntrcLft"],
     }
@@ -234,14 +248,8 @@ def cmd_station(_args: argparse.Namespace) -> None:
         f" -> {STATION_OUT.relative_to(ROOT)}")
 
 
-def cmd_exits(_args: argparse.Namespace) -> None:
-    """Exit and elevator positions from OpenStreetMap (ODbL), so live status can sit on the map."""
-    station = json.loads(STATION_OUT.read_text())
-    c = station["centre"]
-    q = (f"[out:json][timeout:25];("
-         f'node["railway"="subway_entrance"](around:450,{c["lat"]},{c["lon"]});'
-         f'node["highway"="elevator"](around:450,{c["lat"]},{c["lon"]}););out body;')
-    els, errors = None, []
+def _overpass(q: str) -> list[dict]:
+    errors = []
     for endpoint in ("https://overpass-api.de/api/interpreter",
                      "https://overpass.private.coffee/api/interpreter",
                      "https://overpass.kumi.systems/api/interpreter"):
@@ -249,23 +257,37 @@ def cmd_exits(_args: argparse.Namespace) -> None:
             r = httpx.post(endpoint, data={"data": q}, timeout=60,
                            headers={"User-Agent": "barrier-lens-hackathon/0.1 (one-off fetch)"})
             r.raise_for_status()
-            els = r.json().get("elements", [])
-            break
+            return r.json().get("elements", [])
         except Exception as e:  # noqa: BLE001
             errors.append(f"{endpoint}: {e!r}"[:160])
             time.sleep(3)
-    if els is None:
-        raise SystemExit("Overpass failed: " + " | ".join(errors))
+    raise SystemExit("Overpass failed: " + " | ".join(errors))
+
+
+def cmd_exits(_args: argparse.Namespace) -> None:
+    """Exit and elevator positions from OpenStreetMap (ODbL), so live status can sit on the map."""
+    seen: dict[int, dict] = {}
+    for s in STATIONS:
+        q = (f"[out:json][timeout:25];("
+             f'node["railway"="subway_entrance"](around:450,{s["lat"]},{s["lon"]});'
+             f'node["highway"="elevator"](around:450,{s["lat"]},{s["lon"]}););out body;')
+        for e in _overpass(q):
+            seen.setdefault(e["id"], e)
     keep = ("ref", "name", "name:en", "wheelchair", "railway", "highway", "level", "entrance")
+    nodes = []
+    for e in seen.values():
+        near = min(STATIONS, key=lambda s: haversine_m(s["lat"], s["lon"], e["lat"], e["lon"]))
+        nodes.append({"osm_id": e["id"], "lat": e["lat"], "lon": e["lon"], "station": near["key"],
+                      **{k: e["tags"][k] for k in keep if k in e.get("tags", {})}})
     out = {
-        "what": "Subway entrances and elevators within 450 m of the Yangjae centre, from OpenStreetMap",
+        "what": "Subway entrances and elevators within 450 m of Gyeongbokgung and Gwanghwamun stations,"
+                " from OpenStreetMap",
         "fetched_at": now_iso(),
         "license": "ODbL 1.0, (c) OpenStreetMap contributors",
-        "nodes": [{"osm_id": e["id"], "lat": e["lat"], "lon": e["lon"],
-                   **{k: e["tags"][k] for k in keep if k in e.get("tags", {})}} for e in els],
+        "nodes": nodes,
     }
-    (SEOUL_DIR / "yangjae-exits-osm.json").write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n")
-    log(f"exits: {len(out['nodes'])} OSM nodes -> data/seoul/yangjae-exits-osm.json")
+    EXITS_OUT.write_text(json.dumps(out, ensure_ascii=False, indent=1) + "\n")
+    log(f"exits: {len(nodes)} OSM nodes -> {EXITS_OUT.relative_to(ROOT)}")
 
 
 # ---------------------------------------------------------------- build the demo cache
@@ -344,8 +366,8 @@ def cmd_build(_args: argparse.Namespace) -> None:
     points.sort(key=lambda p: (-p["count"], p["address"]))
     all_dates = sorted(d for p in points for d in (p["first"], p["last"]))
     out = {
-        "what": "E-scooter towing records (OA-23057) in 양재동 (양재1동 + 양재2동) within 1 km of Yangjae Station,"
-                " grouped by lot address",
+        "what": "E-scooter towing records (OA-23057) in the listed Jongno-gu and Jung-gu dongs"
+                " within 1 km of Gwanghwamun Gate, grouped by lot address",
         "built_at": now_iso(),
         "centre": c,
         "radius_m": BUILD_RADIUS_M,
@@ -364,12 +386,12 @@ def cmd_build(_args: argparse.Namespace) -> None:
             "addresses_beyond_1km": beyond,
         },
         "caveats": [
-            "Addresses are placed in 300 / 500 / 1000 m bands from the station by geocoding each lot address"
-            " with VWorld at build time; no coordinates are stored (VWorld results may not be stored).",
+            "Addresses are placed in 300 / 500 / 1000 m bands from Gwanghwamun Gate by geocoding each lot"
+            " address with VWorld at build time; no coordinates are stored (VWorld results may not be stored).",
             "Records are past towing reports (DCLR_DT = report date), not current obstacles.",
             "Districts changed how they log towing over the years; compare years inside one district only.",
-            "Only 양재동 (the legal dong of 양재1동 and 양재2동) is geocoded. Parts of the 1 km circle in 도곡동,"
-            " 서초동 and 개포동 have towing too but are not in this file.",
+            f"Only these dongs are geocoded: {', '.join(_JONGNO + _JUNG)}. Parts of the 1 km circle in other"
+            " dongs have towing too but are not in this file.",
             "Some report kinds are the reporter's own free text; those are counted as 기타(신고자 자유 기재).",
         ],
         "source": "Seoul Open Data Plaza OA-23057 (aiTbAutoKickboard), KOGL Type 1;"

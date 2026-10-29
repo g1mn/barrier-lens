@@ -1,0 +1,161 @@
+{
+ "what": "Subway entrances and elevators within 450 m of Gyeongbokgung and Gwanghwamun stations, from OpenStreetMap",
+ "fetched_at": "2026-10-29T13:54:34+09:00",
+ "license": "ODbL 1.0, (c) OpenStreetMap contributors",
+ "nodes": [
+  {
+   "osm_id": 3403538911,
+   "lat": 37.5762007,
+   "lon": 126.9721974,
+   "station": "gyeongbokgung",
+   "ref": "1",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3403538914,
+   "lat": 37.5762348,
+   "lon": 126.9726844,
+   "station": "gyeongbokgung",
+   "ref": "3",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3403538916,
+   "lat": 37.5756332,
+   "lon": 126.9731597,
+   "station": "gyeongbokgung",
+   "ref": "6",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3403538917,
+   "lat": 37.576276,
+   "lon": 126.975494,
+   "station": "gyeongbokgung",
+   "ref": "5",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3841809523,
+   "lat": 37.5729039,
+   "lon": 126.9769138,
+   "station": "gwanghwamun",
+   "highway": "elevator",
+   "level": "0;-1"
+  },
+  {
+   "osm_id": 5268237649,
+   "lat": 37.5757392,
+   "lon": 126.9722083,
+   "station": "gyeongbokgung",
+   "ref": "7",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 5779812094,
+   "lat": 37.5763866,
+   "lon": 126.9724088,
+   "station": "gyeongbokgung",
+   "ref": "2",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 5779812095,
+   "lat": 37.5759692,
+   "lon": 126.9731471,
+   "station": "gyeongbokgung",
+   "ref": "4",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 8218148406,
+   "lat": 37.5760187,
+   "lon": 126.9727733,
+   "station": "gyeongbokgung",
+   "ref": "3-1",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3403193749,
+   "lat": 37.5712694,
+   "lon": 126.9775669,
+   "station": "gwanghwamun",
+   "ref": "3",
+   "wheelchair": "yes",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3403193750,
+   "lat": 37.5707041,
+   "lon": 126.9774533,
+   "station": "gwanghwamun",
+   "ref": "4",
+   "wheelchair": "no",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3403193751,
+   "lat": 37.5698233,
+   "lon": 126.9774219,
+   "station": "gwanghwamun",
+   "ref": "5",
+   "wheelchair": "no",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3403193752,
+   "lat": 37.5697957,
+   "lon": 126.9766147,
+   "station": "gwanghwamun",
+   "ref": "6",
+   "wheelchair": "no",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3403193753,
+   "lat": 37.5704724,
+   "lon": 126.9765102,
+   "station": "gwanghwamun",
+   "ref": "7",
+   "wheelchair": "no",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3403193754,
+   "lat": 37.5718764,
+   "lon": 126.9748938,
+   "station": "gwanghwamun",
+   "ref": "1",
+   "wheelchair": "no",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3403193755,
+   "lat": 37.5717149,
+   "lon": 126.9751526,
+   "station": "gwanghwamun",
+   "ref": "8",
+   "wheelchair": "no",
+   "railway": "subway_entrance"
+  },
+  {
+   "osm_id": 3841809500,
+   "lat": 37.5713027,
+   "lon": 126.9769417,
+   "station": "gwanghwamun",
+   "ref": "9",
+   "wheelchair": "yes",
+   "railway": "subway_entrance",
+   "level": "-1"
+  },
+  {
+   "osm_id": 5197260361,
+   "lat": 37.5724998,
+   "lon": 126.9773857,
+   "station": "gwanghwamun",
+   "ref": "2",
+   "wheelchair": "no",
+   "railway": "subway_entrance"
+  }
+ ]
+}

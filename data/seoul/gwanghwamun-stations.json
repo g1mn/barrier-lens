@@ -1,0 +1,191 @@
+{
+ "area": "Gwanghwamun & Gyeongbokgung",
+ "fetched_at": "2026-10-29T13:53:29+09:00",
+ "centre": {
+  "lat": 37.5759283,
+  "lon": 126.9768176,
+  "how": "Gwanghwamun Gate (OSM way 170199440)"
+ },
+ "stations": [
+  {
+   "key": "gyeongbokgung",
+   "name": "Gyeongbokgung",
+   "line": "Line 3"
+  },
+  {
+   "key": "gwanghwamun",
+   "name": "Gwanghwamun",
+   "line": "Line 5"
+  }
+ ],
+ "elevators_2020": [
+  {
+   "node_id": 212372,
+   "lat": 37.5759657,
+   "lon": 126.9741337,
+   "station_code": "271",
+   "dong": "적선동"
+  }
+ ],
+ "entrance_lifts_2020": [],
+ "live_status": [
+  {
+   "name": "승강기)에스컬레이터-경복궁 3-1번출구 10호기",
+   "kind": "ES",
+   "where": "3-1번 출입구",
+   "floors": "B1-1F",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)에스컬레이터-경복궁 3-1번출구 9호기",
+   "kind": "ES",
+   "where": "3-1번 출입구",
+   "floors": "1F-B1",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)에스컬레이터-경복궁 내부 1호기",
+   "kind": "ES",
+   "where": "안국 방면9-1, 독립문 방면2-4",
+   "floors": "B2-B3",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)에스컬레이터-경복궁 내부 2호기",
+   "kind": "ES",
+   "where": "독립문 방면2-4, 안국 방면9-1",
+   "floors": "B3-B2",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)에스컬레이터-경복궁 내부 3호기",
+   "kind": "ES",
+   "where": "안국 방면3-2, 독립문 방면8-3",
+   "floors": "B3-B2",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)에스컬레이터-경복궁 내부 4호기",
+   "kind": "ES",
+   "where": "안국 방면3-2, 독립문 방면8-3",
+   "floors": "B2-B3",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)에스컬레이터-경복궁 내부 5호기",
+   "kind": "ES",
+   "where": "대합실(E계단)",
+   "floors": "B1-B2",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)에스컬레이터-경복궁 내부 6호기",
+   "kind": "ES",
+   "where": "대합실(E계단)",
+   "floors": "B2-B1",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)에스컬레이터-경복궁 내부 7호기",
+   "kind": "ES",
+   "where": "대합실(H계단)",
+   "floors": "B1-B2",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)에스컬레이터-경복궁 내부 8호기",
+   "kind": "ES",
+   "where": "대합실(H계단)",
+   "floors": "B2-B1",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)엘리베이터-경복궁 4번 출구측 외부#1",
+   "kind": "EV",
+   "where": "4번 출입구",
+   "floors": "B2-1F",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)엘리베이터-경복궁 섬식(상) 6-2 내부#1",
+   "kind": "EV",
+   "where": "독립문 방면6-2, 안국 방면5-3",
+   "floors": "B3-B2",
+   "status": "사용가능",
+   "station": "gyeongbokgung"
+  },
+  {
+   "name": "승강기)에스컬레이터-광화문 내부1",
+   "kind": "ES",
+   "where": "서대문 방면1-1, 종로3가 방면8-4",
+   "floors": "B3-B2",
+   "status": "보수중",
+   "station": "gwanghwamun"
+  },
+  {
+   "name": "승강기)에스컬레이터-광화문 내부2",
+   "kind": "ES",
+   "where": "서대문 방면1-1, 종로3가 방면8-4",
+   "floors": "B2-B3",
+   "status": "사용가능",
+   "station": "gwanghwamun"
+  },
+  {
+   "name": "승강기)에스컬레이터-광화문 내부3",
+   "kind": "ES",
+   "where": "대합실(광장 측)",
+   "floors": "B2-B1",
+   "status": "사용가능",
+   "station": "gwanghwamun"
+  },
+  {
+   "name": "승강기)에스컬레이터-광화문 내부4",
+   "kind": "ES",
+   "where": "대합실(광장 측)",
+   "floors": "B1-B2",
+   "status": "사용가능",
+   "station": "gwanghwamun"
+  },
+  {
+   "name": "승강기)엘리베이터-광화문 내부2",
+   "kind": "EV",
+   "where": "서대문 방면1-1,종로3가 방면8-4",
+   "floors": "B2-B4",
+   "status": "사용가능",
+   "station": "gwanghwamun"
+  },
+  {
+   "name": "승강기)엘리베이터-광화문 외부1",
+   "kind": "EV",
+   "where": "서대문 방면1-1, 종로3가 방면8-4",
+   "floors": "B2-B1-1F",
+   "status": "사용가능",
+   "station": "gwanghwamun"
+  }
+ ],
+ "counts": {
+  "SeoulMetroFaciInfo_total": 2809,
+  "tbTraficElvtr_total": 552,
+  "tbTraficEntrcLft_total": 83
+ },
+ "notes": [
+  "live_status comes from OA-15994. Both stations are Seoul Metro lines (Gyeongbokgung Line 3, Gwanghwamun Line 5), so both are in this feed.",
+  "elevators_2020 / entrance_lifts_2020 are 2020 positions (OA-21212 / OA-21211) for Gyeongbokgung only and do not say which exit they serve."
+ ],
+ "sources": [
+  "OA-15994 SeoulMetroFaciInfo",
+  "OA-21212 tbTraficElvtr",
+  "OA-21211 tbTraficEntrcLft"
+ ]
+}

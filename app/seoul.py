@@ -1,4 +1,4 @@
-"""Seoul public data for the map: e-scooter towing history and Yangjae Station accessibility.
+"""Seoul public data for the map: e-scooter towing history and Gwanghwamun & Gyeongbokgung accessibility.
 
 Everything is read from small caches in data/seoul/ written by scripts/fetch_seoul.py.
 Nothing here calls VWorld at runtime. station(live=True) may refresh the elevator status from
@@ -16,12 +16,22 @@ import httpx
 from app.config import key
 
 DATA = Path(__file__).resolve().parents[1] / "data" / "seoul"
-TOWING_FILE = DATA / "towing-yangjae.json"
-STATION_FILE = DATA / "yangjae-station.json"
-EXITS_FILE = DATA / "yangjae-exits-osm.json"
+TOWING_FILE = DATA / "towing-gwanghwamun.json"
+STATION_FILE = DATA / "gwanghwamun-stations.json"
+EXITS_FILE = DATA / "gwanghwamun-exits-osm.json"
 
-# Yangjae Station centre: mean of the 4 OA-21212 elevator nodes named 양재(서초구청) (see yangjae-station.json).
-YANGJAE = (37.4840283, 127.0346411)
+# Area centre: Gwanghwamun Gate (OSM way 170199440), from OpenStreetMap (ODbL).
+CENTRE = (37.5759283, 126.9768176)
+
+# Demo stations. Positions from OpenStreetMap (ODbL): Gyeongbokgung Station node 6033544429,
+# Gwanghwamun Station node 6039313647. oa_name is the OA-15994 STN_NM value (the live feed
+# names Gyeongbokgung "경복궁(정부서울청사)" in OA-21212 elevator nodes; Gwanghwamun has none).
+STATIONS = (
+    {"key": "gyeongbokgung", "name": "Gyeongbokgung", "line": "Line 3",
+     "oa_name": "경복궁", "lat": 37.5757873, "lon": 126.973526},
+    {"key": "gwanghwamun", "name": "Gwanghwamun", "line": "Line 5",
+     "oa_name": "광화문", "lat": 37.5716162, "lon": 126.9769026},
+)
 
 # English glosses for the towing "TYPE" values seen in OA-23057 (Korean original stays the key).
 TYPE_EN = {
@@ -54,7 +64,7 @@ TYPE_EN = {
 @lru_cache(maxsize=1)
 def _towing() -> dict:
     if not TOWING_FILE.exists():
-        return {"data": [], "radius_m": 0, "centre": {"lat": YANGJAE[0], "lon": YANGJAE[1]}}
+        return {"data": [], "radius_m": 0, "centre": {"lat": CENTRE[0], "lon": CENTRE[1]}}
     return json.loads(TOWING_FILE.read_text())
 
 
@@ -69,9 +79,9 @@ def towing_near(lat: float, lon: float, radius_m: float) -> list[dict]:
 
     Each item: address, band_m, count, first, last (report dates YYYY-MM-DD), kinds ({kind: n},
     Korean form categories), plus by_year, kinds_en, and addr / types_en (aliases kept for
-    static/app.js). Reads data/seoul/towing-yangjae.json only; never calls VWorld or Seoul Open Data.
-    lat/lon are ignored: the cache only covers Yangjae Station. Only 양재동 within 1 km of Yangjae
-    Station is cached: an empty list outside it means "not cached", not "no towing".
+    static/app.js). Reads data/seoul/towing-gwanghwamun.json only; never calls VWorld or Seoul Open Data.
+    lat/lon are ignored: the cache only covers Gwanghwamun Gate. Only the listed Jongno-gu and Jung-gu
+    dongs within 1 km of the gate are cached: an empty list outside them means "not cached", not "no towing".
     """
     out = []
     for p in _towing().get("data", []):
@@ -89,13 +99,16 @@ def towing_near(lat: float, lon: float, radius_m: float) -> list[dict]:
     return out
 
 
-def exit_position(ref: str) -> tuple[float, float] | None:
-    """(lat, lon) of a Yangjae Station exit by its number, from the cached OpenStreetMap nodes."""
+def exit_position(ref: str, station_key: str | None = None) -> tuple[float, float] | None:
+    """(lat, lon) of a station exit by its number, from the cached OpenStreetMap nodes."""
     if not EXITS_FILE.exists():
         return None
     for n in json.loads(EXITS_FILE.read_text()).get("nodes", []):
-        if n.get("railway") == "subway_entrance" and n.get("ref") == str(ref):
-            return n["lat"], n["lon"]
+        if n.get("railway") != "subway_entrance" or n.get("ref") != str(ref):
+            continue
+        if station_key is not None and n.get("station") != station_key:
+            continue
+        return n["lat"], n["lon"]
     return None
 
 
@@ -103,6 +116,14 @@ def exit_position(ref: str) -> tuple[float, float] | None:
 
 _live_cache: dict = {"at": 0.0, "rows": None, "as_of": None}
 LIVE_TTL_S = 600
+
+
+def _station_key(stn_nm: str) -> str | None:
+    # OA-15994 STN_NM now comes without a line suffix ("경복궁"); older rows had one ("양재(3)").
+    for s in STATIONS:
+        if stn_nm == s["oa_name"] or stn_nm.startswith(s["oa_name"] + "("):
+            return s["key"]
+    return None
 
 
 def _fetch_live_status() -> list[dict]:
@@ -121,9 +142,14 @@ def _fetch_live_status() -> list[dict]:
             total = int(d["list_total_count"])
             rows += d.get("row", [])
             start += 1000
-    return [{"name": r["ELVTR_NM"], "kind": r["ELVTR_SE"], "where": r["INSTL_PSTN"],
-             "floors": r["OPR_SEC"], "status": r["USE_YN"], "station": r["STN_NM"]}
-            for r in rows if (r.get("STN_NM") or "").startswith("양재(")]
+    out = []
+    for r in rows:
+        sk = _station_key(r.get("STN_NM") or "")
+        if sk is None:
+            continue
+        out.append({"name": r["ELVTR_NM"], "kind": r["ELVTR_SE"], "where": r["INSTL_PSTN"],
+                    "floors": r["OPR_SEC"], "status": r["USE_YN"], "station": sk})
+    return out
 
 
 def _exit_ref(where: str) -> str | None:
@@ -132,8 +158,15 @@ def _exit_ref(where: str) -> str | None:
     return head if head.isdigit() else None
 
 
+def _row_station(r: dict) -> str | None:
+    s = r.get("station", "")
+    if any(s == st["key"] for st in STATIONS):
+        return s
+    return _station_key(s)
+
+
 def station(live: bool = False) -> dict:
-    """Yangjae Station accessibility: exits (OSM positions) joined with elevator status (OA-15994)."""
+    """Gwanghwamun & Gyeongbokgung accessibility: exits (OSM positions) joined with elevator status (OA-15994)."""
     cached = json.loads(STATION_FILE.read_text()) if STATION_FILE.exists() else {}
     status_rows, as_of, source, note = cached.get("live_status", []), cached.get("fetched_at"), "cache", None
     if live:
@@ -148,35 +181,46 @@ def station(live: bool = False) -> dict:
             except Exception as e:  # noqa: BLE001
                 note = f"live refresh failed ({e}); showing the cached status"
     exits_osm = json.loads(EXITS_FILE.read_text())["nodes"] if EXITS_FILE.exists() else []
-    by_exit: dict[str, list[dict]] = {}
+    by_exit: dict[tuple[str, str], list[dict]] = {}
     for r in status_rows:
         ref = _exit_ref(r["where"])
-        if ref:
-            by_exit.setdefault(ref, []).append(r)
-    exits = []
-    for n in exits_osm:
-        if n.get("railway") != "subway_entrance" or "ref" not in n:
-            continue
-        lifts = [r for r in by_exit.get(n["ref"], []) if r["kind"] == "EV"]
-        exits.append({
-            "ref": n["ref"], "lat": n["lat"], "lon": n["lon"],
-            "elevator": ("none listed" if not lifts else
-                         "working" if all(r["status"] == "사용가능" for r in lifts) else "out of service"),
-            "elevator_rows": lifts,
-            "osm_wheelchair": n.get("wheelchair"),
-        })
-    exits.sort(key=lambda e: (len(e["ref"]), e["ref"]))
+        sk = _row_station(r)
+        if ref and sk:
+            by_exit.setdefault((sk, ref), []).append(r)
+    stations, flat = [], []
+    for s in STATIONS:
+        st_exits = []
+        for n in exits_osm:
+            if n.get("railway") != "subway_entrance" or "ref" not in n:
+                continue
+            if n.get("station", s["key"]) != s["key"]:
+                continue
+            lifts = [r for r in by_exit.get((s["key"], n["ref"]), []) if r["kind"] == "EV"]
+            st_exits.append({
+                "ref": n["ref"], "lat": n["lat"], "lon": n["lon"],
+                "station": s["key"], "station_name": s["name"],
+                "elevator": ("none listed" if not lifts else
+                             "working" if all(r["status"] == "사용가능" for r in lifts) else "out of service"),
+                "elevator_rows": lifts,
+                "osm_wheelchair": n.get("wheelchair"),
+            })
+        st_exits.sort(key=lambda e: (len(e["ref"]), e["ref"]))
+        inside = [r for r in status_rows if _row_station(r) == s["key"] and _exit_ref(r["where"]) is None]
+        stations.append({"key": s["key"], "name": s["name"], "line": s["line"],
+                         "exits": st_exits, "inside": inside})
+        flat += st_exits
+    flat.sort(key=lambda e: (e["station"], len(e["ref"]), e["ref"]))
     return {
-        "station": "Yangjae (Line 3 / Shinbundang)",
-        "centre": {"lat": YANGJAE[0], "lon": YANGJAE[1]},
+        "area": "Gwanghwamun & Gyeongbokgung",
+        "centre": {"lat": CENTRE[0], "lon": CENTRE[1]},
         "status_source": source,
         "status_as_of": as_of,
         "note": note,
-        "exits": exits,
-        "inside": [r for r in status_rows if _exit_ref(r["where"]) is None],
+        "stations": stations,
+        "exits": flat,
+        "inside": [r for s in stations for r in s["inside"]],
         "caveats": [
-            "Elevator status covers the Line 3 (Seoul Metro) side only. The Shinbundang side is run by "
-            "another operator and is not in OA-15994.",
+            "Both stations are Seoul Metro lines in OA-15994: Gyeongbokgung (Line 3) and Gwanghwamun (Line 5).",
             "'none listed' means the feed has no elevator row for that exit, not that the exit has no lift.",
             "Exit positions are from OpenStreetMap.",
         ],

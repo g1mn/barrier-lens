@@ -1,9 +1,9 @@
-/* Barrier Lens front end: map of Yangjae Station + "Check a spot" flow. No build step. */
+/* Barrier Lens front end: map of Gwanghwamun & Gyeongbokgung + "Check a spot" flow. No build step. */
 (() => {
   'use strict';
 
   const $ = (sel) => document.querySelector(sel);
-  const YANGJAE = [37.4840283, 127.0346411];
+  const CENTRE = [37.5759283, 126.9768176];  // Gwanghwamun Gate; the map opens here
   const params = new URLSearchParams(location.search);
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const VERDICT_WORD = { passes: 'Passes', tight: 'Tight', blocked: 'Blocked', unknown: 'Unknown' };
@@ -46,7 +46,7 @@
   });
 
   // ------------------------------------------------------------------ map
-  const map = L.map('map', { zoomControl: false, attributionControl: true }).setView(YANGJAE, 16);
+  const map = L.map('map', { zoomControl: false, attributionControl: true }).setView(CENTRE, 16);
   L.control.zoom({ position: 'topright' }).addTo(map);
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
@@ -123,7 +123,7 @@
     stat.textContent = 'Loading towing history…';
     let d;
     try {
-      const res = await fetch(`/api/towing?lat=${YANGJAE[0]}&lon=${YANGJAE[1]}&r=${r}`);
+      const res = await fetch(`/api/towing?lat=${CENTRE[0]}&lon=${CENTRE[1]}&r=${r}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       d = await res.json();
     } catch (e) {
@@ -132,7 +132,7 @@
     }
     towLayer.clearLayers();
     if (ring) ring.remove();
-    ring = L.circle(YANGJAE, { radius: r, color: '#111', weight: 2, dashArray: '6 6', fill: false, interactive: false }).addTo(map);
+    ring = L.circle(CENTRE, { radius: r, color: '#111', weight: 2, dashArray: '6 6', fill: false, interactive: false }).addTo(map);
 
     // no per-address coordinates are stored, so only the ring is drawn
     const pts = d.points || [];
@@ -145,14 +145,14 @@
     } else {
       const first = pts.reduce((a, p) => (p.first < a ? p.first : a), pts[0].first);
       const last = pts.reduce((a, p) => (p.last > a ? p.last : a), pts[0].last);
-      stat.innerHTML = `<strong>${d.records.toLocaleString('en')}</strong> e-scooter towing reports at ${pts.length} addresses within ${r >= 1000 ? `${r / 1000} km` : `${r} m`} · ${monthLabel(first)} – ${monthLabel(last)}`;
+      stat.innerHTML = `<strong>${d.records.toLocaleString('en')}</strong> e-scooter towing reports at ${pts.length} addresses within ${r >= 1000 ? `${r / 1000} km` : `${r} m`} of Gwanghwamun Gate · ${monthLabel(first)} – ${monthLabel(last)}`;
     }
 
     const list = $('#hotspots');
     list.innerHTML = '';
     [...pts].sort((a, b) => b.count - a.count).slice(0, 5).forEach((p) => {
       const li = document.createElement('li');
-      li.innerHTML = `<span class="addr" lang="ko">${esc(shortAddr(p.addr))}<span class="meta" lang="en">within ${p.band_m} m of the station · last ${monthLabel(p.last)}</span></span>
+      li.innerHTML = `<span class="addr" lang="ko">${esc(shortAddr(p.addr))}<span class="meta" lang="en">within ${p.band_m} m of Gwanghwamun Gate · last ${monthLabel(p.last)}</span></span>
         <span class="n">${p.count}<span class="visually-hidden"> reports</span></span>`;
       list.appendChild(li);
     });
@@ -184,27 +184,27 @@
       return;
     }
     exitLayer.clearLayers();
-    const withLift = [];
     (d.exits || []).forEach((x) => {
       const cls = x.elevator === 'working' ? 'ev-working' : x.elevator === 'out of service' ? 'ev-out' : '';
-      if (cls) withLift.push(x);
       const icon = L.divIcon({ className: '', html: `<div class="exit-pin ${cls}">${esc(x.ref)}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
       const rows = (x.elevator_rows || []).map((r) => `<li lang="ko">${esc(r.name.replace(/^승강기\)/, ''))}: <strong>${esc(r.status)}</strong></li>`).join('');
       const body = x.elevator === 'none listed'
         ? '<p>No elevator is listed for this exit in the Seoul Metro feed.</p>'
         : `<p>Elevator <strong>${esc(x.elevator)}</strong></p><ul>${rows}</ul>`;
-      L.marker([x.lat, x.lon], { icon, title: `Exit ${x.ref}: elevator ${x.elevator}`, keyboard: true, zIndexOffset: cls ? 500 : 0 })
-        .bindPopup(`<h4>Exit ${esc(x.ref)}</h4>${body}<p class="ko">Status ${esc(d.status_source)} · ${esc(fmtTime(d.status_as_of))}</p>`)
+      const label = `${x.station_name} exit ${x.ref}`;
+      L.marker([x.lat, x.lon], { icon, title: `${label}: elevator ${x.elevator}`, keyboard: true, zIndexOffset: cls ? 500 : 0 })
+        .bindPopup(`<h4>${esc(label)}</h4>${body}<p class="ko">Status ${esc(d.status_source)} · ${esc(fmtTime(d.status_as_of))}</p>`)
         .addTo(exitLayer);
     });
-    if (!withLift.length) {
-      line.textContent = 'No exit elevators listed.';
-      return;
-    }
-    const parts = withLift.map((x) => (x.elevator === 'working'
-      ? `exit ${x.ref} working`
-      : `<strong>exit ${x.ref} out of service</strong>`));
-    line.innerHTML = `Elevators: ${parts.join(' · ')} <span class="asof">(${esc(d.status_source)}, ${esc(fmtTime(d.status_as_of))})</span>`;
+    const parts = (d.stations || []).map((s) => {
+      const withLift = (s.exits || []).filter((x) => x.elevator === 'working' || x.elevator === 'out of service');
+      const bit = !withLift.length ? 'no exit elevator listed'
+        : withLift.map((x) => (x.elevator === 'working'
+          ? `exit ${x.ref} elevator working`
+          : `<strong>exit ${x.ref} out of service</strong>`)).join(', ');
+      return `${esc(s.name)} (${esc(s.line)}): ${bit}`;
+    });
+    line.innerHTML = `${parts.join(' · ')} <span class="asof">(${esc(d.status_source)}, ${esc(fmtTime(d.status_as_of))})</span>`;
   }
   function fmtTime(iso) {
     if (!iso) return 'time unknown';
@@ -981,7 +981,7 @@
 
   // ------------------------------------------------------------------ start
   layout();
-  centreOn(L.latLng(YANGJAE), 16);
+  centreOn(L.latLng(CENTRE), 16);
   loadTowing(500);
   loadStation();
   if (params.get('check') === '1' || params.get('sample')) enterCheck();
