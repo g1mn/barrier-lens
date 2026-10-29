@@ -981,6 +981,267 @@
   }
   fillForm();
 
+  // ------------------------------------------------- opening "Where is this?" intro
+  // Earth -> East Asia -> South Korea -> Seoul -> Gwanghwamun Gate in ~6.5 s.
+  // Plays once per visit, never delays data loading, skips silently when d3,
+  // topojson or the vendor TopoJSON is missing. Skip: the button, Esc, or any
+  // tap on the overlay. #tour plays the intro first, #nointro never plays it.
+  let introDone = Promise.resolve();
+  let playIntroNow = () => Promise.resolve();
+  {
+    const SEOUL_LONLAT = [126.9780, 37.5665];
+    const FLAG = 'bl-intro-seen';
+    const GLOBE_CREDIT = 'Globe: Natural Earth';
+    const overlay = $('#intro');
+    const canvas = $('#intro-globe');
+    const cap = $('#intro-cap');
+    const capText = $('#intro-cap-text');
+    const skipBtn = $('#intro-skip');
+    const reduceMq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let cancelPlay = null;  // set while the intro runs; skip paths call it
+
+    const seen = () => { try { return sessionStorage.getItem(FLAG) === '1'; } catch { return false; } };
+    const markSeen = () => { try { sessionStorage.setItem(FLAG, '1'); } catch { /* private mode */ } };
+    const cssVar = (n) => (getComputedStyle(document.documentElement).getPropertyValue(n) || '').trim();
+    const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const creditOn = () => { try { map.attributionControl.addAttribution(GLOBE_CREDIT); } catch { /* no map */ } };
+    const creditOff = () => { try { map.attributionControl.removeAttribution(GLOBE_CREDIT); } catch { /* no map */ } };
+
+    function setCaption(t) { if (capText && capText.textContent !== t) capText.textContent = t; }
+    function showCap(t) { setCaption(t); if (cap) { cap.classList.remove('fading'); cap.hidden = false; } }
+    function hideCap() {
+      if (!cap || cap.hidden) return;
+      const kill = () => { cap.hidden = true; cap.classList.remove('fading'); };
+      cap.classList.add('fading');
+      if (reduceMq.matches) kill();
+      else setTimeout(kill, 650);
+    }
+    function blurSkip() { if (skipBtn && document.activeElement === skipBtn) skipBtn.blur(); }
+
+    // The page's normal state: Gwanghwamun Gate at zoom 16, adjusted for the sheet.
+    function finalMapState(fly) {
+      try {
+        if (fly && !reduceMq.matches) {
+          map.flyTo(CENTRE, 16, { duration: 1.4 });
+          map.once('moveend', () => { try { centreOn(L.latLng(CENTRE)); } catch { /* keep map */ } });
+        } else {
+          centreOn(L.latLng(CENTRE), 16);
+        }
+      } catch { /* keep whatever view the map has */ }
+    }
+
+    if (skipBtn) skipBtn.addEventListener('click', (e) => { e.stopPropagation(); if (cancelPlay) cancelPlay(); });
+    if (overlay) overlay.addEventListener('click', () => { if (cancelPlay) cancelPlay(); });
+    document.addEventListener('keydown', (e) => {
+      if (cancelPlay && e.key === 'Escape') { e.preventDefault(); cancelPlay(); }
+    });
+
+    // Reduced motion: no globe, no camera move. Final map plus a static chip for 3 s.
+    function playStatic() {
+      return new Promise((resolve) => {
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
+          cancelPlay = null;
+          markSeen();
+          hideCap();
+          resolve();
+        };
+        cancelPlay = done;
+        showCap('Gwanghwamun Gate, Seoul, South Korea');
+        setTimeout(done, 3000);
+      });
+    }
+
+    function playAnimated() {
+      return new Promise((resolve) => {
+        let settled = false;
+        let raf = 0;
+        let detachResize = null;
+        const stopLoop = () => {
+          if (raf) cancelAnimationFrame(raf);
+          raf = 0;
+          if (detachResize) { window.removeEventListener('resize', detachResize); detachResize = null; }
+        };
+        const hideOverlayNow = () => {
+          if (overlay) { overlay.classList.remove('fading'); overlay.hidden = true; }
+        };
+        const endSkip = () => {  // straight to the final normal state
+          if (settled) return;
+          settled = true;
+          cancelPlay = null;
+          stopLoop();
+          markSeen();
+          creditOff();
+          hideOverlayNow();
+          if (cap) { cap.classList.remove('fading'); cap.hidden = true; }
+          blurSkip();
+          finalMapState(false);
+          resolve();
+        };
+        const endNatural = () => {  // after the ~6.5 s arc
+          if (settled) return;
+          settled = true;
+          cancelPlay = null;
+          stopLoop();
+          markSeen();
+          creditOff();
+          hideCap();  // fades, then hides
+          blurSkip();
+          resolve();
+        };
+        const giveUp = () => {  // vendor JSON missing: silent, unmarked, map untouched
+          if (settled) return;
+          settled = true;
+          cancelPlay = null;
+          resolve();
+        };
+        cancelPlay = endSkip;
+
+        const load = Promise.all([
+          fetch('/static/vendor/land-110m.json').then((r) => { if (!r.ok) throw new Error('land'); return r.json(); }),
+          fetch('/static/vendor/countries-110m.json').then((r) => { if (!r.ok) throw new Error('countries'); return r.json(); }),
+        ]);
+        const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000));
+        Promise.race([load, timeout]).then(([landTopo, cTopo]) => {
+          if (settled) return;
+          reveal(landTopo, cTopo);
+        }).catch(giveUp);
+
+        function reveal(landTopo, cTopo) {
+          let land = null;
+          let korea = null;
+          try {
+            land = window.topojson.feature(landTopo, landTopo.objects.land);
+            const feats = window.topojson.feature(cTopo, cTopo.objects.countries).features;
+            korea = feats.find((f) => f && f.properties && f.properties.name === 'South Korea') || null;
+          } catch { giveUp(); return; }
+          const ctx = canvas.getContext('2d');
+          if (!ctx) { giveUp(); return; }
+
+          // The Leaflet map sits at about zoom 11 over Seoul under the overlay.
+          try { centreOn(L.latLng([37.55, 126.98]), 11); } catch { /* keep view */ }
+          creditOn();
+          overlay.hidden = false;
+          overlay.classList.remove('fading');
+          showCap('Where in the world?');
+          try { skipBtn.focus({ preventScroll: true }); } catch { try { skipBtn.focus(); } catch { /* ignore */ } }
+
+          const dpr = Math.min(window.devicePixelRatio || 1, 2);
+          let W = 0, H = 0, R0 = 0, CX = 0, CY = 0;
+          const measure = () => {
+            const r = overlay.getBoundingClientRect();
+            W = Math.max(1, Math.round(r.width * dpr));
+            H = Math.max(1, Math.round(r.height * dpr));
+            if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+            const wide = window.matchMedia('(min-width: 900px)').matches;
+            CX = W / 2 + (wide ? 208 * dpr : 0);
+            CY = H * 0.44;
+            R0 = 0.40 * Math.min(W, H);
+          };
+          measure();
+          detachResize = measure;
+          window.addEventListener('resize', measure);
+
+          const projection = window.d3.geoOrthographic().translate([CX, CY]).clipAngle(90);
+          const path = window.d3.geoPath(projection, ctx);
+          const grat = window.d3.geoGraticule10();
+          const segA = window.d3.geoInterpolate([25, -38], [-114, -28]);  // Atlantic/Europe -> East Asia
+          const segB = window.d3.geoInterpolate([-114, -28], [-126, -35]);  // -> Korean peninsula
+          const T_A = 2.6, T_B = 4.0, T_C = 5.0, T_END = 6.5;
+          const ocean = cssVar('--globe-ocean') || '#17263f';
+          const landFill = cssVar('--globe-land') || '#9aa3b2';
+          const gratStroke = cssVar('--globe-grat') || 'rgba(255,255,255,.16)';
+          const rim = cssVar('--globe-rim') || 'rgba(255,255,255,.28)';
+          const accent = cssVar('--accent') || '#ffd23f';
+          const ink = cssVar('--accent-ink') || '#121212';
+          const textCol = cssVar('--text') || '#fff';
+          const t0 = performance.now();
+          let flew = false;
+
+          const frame = (now) => {
+            if (settled) return;
+            const t = (now - t0) / 1000;
+            const rot = t < T_A ? segA(easeInOut(Math.min(1, t / T_A)))
+              : segB(easeInOut(Math.min(1, (t - T_A) / (T_B - T_A))));
+            const zoom = t < T_A ? lerp(0.85, 1.15, easeInOut(Math.min(1, t / T_A)))
+              : lerp(1.15, 1.6, easeInOut(Math.min(1, (t - T_A) / (T_B - T_A))));
+            const R = R0 * zoom;
+            projection.rotate(rot).scale(R).translate([CX, CY]);
+
+            ctx.clearRect(0, 0, W, H);
+            ctx.beginPath(); path({ type: 'Sphere' }); ctx.fillStyle = ocean; ctx.fill();
+            if (land) { ctx.beginPath(); path(land); ctx.fillStyle = landFill; ctx.fill(); }
+            ctx.beginPath(); path(grat);
+            ctx.strokeStyle = gratStroke; ctx.lineWidth = Math.max(1, dpr * 0.6); ctx.stroke();
+            if (korea && t > 2.2) {  // South Korea fills with the accent colour
+              ctx.save();
+              ctx.globalAlpha = Math.min(1, (t - 2.2) / 0.6);
+              ctx.beginPath(); path(korea); ctx.fillStyle = accent; ctx.fill();
+              ctx.strokeStyle = 'rgba(0,0,0,.4)'; ctx.lineWidth = Math.max(1, dpr * 0.7); ctx.stroke();
+              ctx.restore();
+            }
+            ctx.beginPath(); path({ type: 'Sphere' });
+            ctx.strokeStyle = rim; ctx.lineWidth = Math.max(1, dpr * 1.2); ctx.stroke();
+            if (t > T_A) {  // pulsing Seoul dot + label
+              const p = projection(SEOUL_LONLAT);
+              if (p) {
+                const dx = p[0] - CX, dy = p[1] - CY;
+                if (dx * dx + dy * dy <= R * R) {
+                  const a = Math.min(1, (t - T_A) / 0.6);
+                  const pulse = (now / 1200) % 1;
+                  ctx.save();
+                  ctx.globalAlpha = a * (1 - pulse) * 0.7;
+                  ctx.beginPath(); ctx.arc(p[0], p[1], (6 + 11 * pulse) * dpr, 0, 2 * Math.PI);
+                  ctx.strokeStyle = accent; ctx.lineWidth = 2 * dpr; ctx.stroke();
+                  ctx.globalAlpha = a;
+                  ctx.beginPath(); ctx.arc(p[0], p[1], 4.5 * dpr, 0, 2 * Math.PI);
+                  ctx.fillStyle = accent; ctx.fill();
+                  ctx.strokeStyle = ink; ctx.lineWidth = 1.5 * dpr; ctx.stroke();
+                  ctx.font = `600 ${13 * dpr}px system-ui, sans-serif`;
+                  ctx.lineWidth = 3 * dpr; ctx.strokeStyle = ocean;
+                  ctx.strokeText('Seoul', p[0] + 10 * dpr, p[1] - 10 * dpr);
+                  ctx.fillStyle = textCol;
+                  ctx.fillText('Seoul', p[0] + 10 * dpr, p[1] - 10 * dpr);
+                  ctx.restore();
+                }
+              }
+            }
+
+            if (t < T_A * 0.55) setCaption('Where in the world?');  // the globe still faces the Atlantic
+            else if (t < T_A) setCaption('East Asia');
+            else if (t < T_B) setCaption('South Korea');
+            else if (t < T_C) {
+              setCaption('Seoul');
+              if (!overlay.classList.contains('fading')) overlay.classList.add('fading');
+            } else if (!flew) {
+              flew = true;
+              hideOverlayNow();
+              setCaption('Gwanghwamun Gate · Gyeongbokgung Palace');
+              finalMapState(true);
+            }
+            if (t >= T_END) { endNatural(); return; }
+            raf = requestAnimationFrame(frame);
+          };
+          raf = requestAnimationFrame(frame);
+        }
+      });
+    }
+
+    playIntroNow = (opts = {}) => {
+      const force = !!opts.force;
+      if (!overlay || !canvas || !cap || !skipBtn) return Promise.resolve();
+      if (location.hash === '#nointro') return Promise.resolve();
+      if (!force && seen()) return Promise.resolve();
+      if (cancelPlay) cancelPlay();  // a replay never overlaps a running intro
+      if (reduceMq.matches) return playStatic();
+      if (!window.d3 || !window.topojson) return Promise.resolve();
+      return playAnimated();
+    };
+  }
+
   // ------------------------------------------------------------------ 1-minute tour
   // Self-running tour for a judge: no upload, no paid calls. It drives the real UI
   // (the sample buttons, setSheet, centreOn) in replay mode. One data array on top:
@@ -1251,8 +1512,14 @@
   });
   function maybeTour(boot) {
     if (location.hash !== '#tour') return;
-    Promise.race([boot, new Promise((r) => setTimeout(r, 2000))]).then(() => startTour());
+    Promise.race([boot, new Promise((r) => setTimeout(r, 2000))])
+      .then(() => introDone).then(() => startTour(), () => startTour());
   }
+  const introReplayBtn = $('#tour-intro');
+  if (introReplayBtn) introReplayBtn.addEventListener('click', () => {
+    tourCloseFull();
+    introDone = playIntroNow({ force: true });
+  });
 
   // ------------------------------------------------------------------ start
   layout();
@@ -1261,5 +1528,6 @@
   if (params.get('check') === '1' || params.get('sample')) enterCheck();
   if (params.get('sample')) runSample(false, crosshairLatLng());
   if (params.get('open') === '1') setSheet('half');
+  introDone = playIntroNow({ force: location.hash === '#tour' });
   maybeTour(bootData);
 })();

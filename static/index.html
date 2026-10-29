@@ -33,6 +33,13 @@
   <div id="map" role="region" aria-label="Map around Gwanghwamun and Gyeongbokgung, Seoul. The dashed ring marks the area whose towing reports are counted; numbered markers show station exits."></div>
   <div class="crosshair" id="crosshair" hidden aria-hidden="true"><span></span></div>
 
+  <div id="intro" hidden>
+    <canvas id="intro-globe" aria-hidden="true"></canvas>
+    <button type="button" class="btn small intro-skip" id="intro-skip">Skip intro</button>
+    <p class="visually-hidden" role="status">Locating: Gwanghwamun Gate, Seoul, South Korea</p>
+  </div>
+  <p id="intro-cap" hidden><span class="intro-dot" aria-hidden="true"></span><span id="intro-cap-text">East Asia</span></p>
+
   <section class="sheet" id="sheet" aria-labelledby="sheet-title" data-state="peek" tabindex="-1">
     <button type="button" class="sheet-handle" id="sheet-handle" aria-expanded="false" aria-controls="sheet-body">
       <span class="grip" aria-hidden="true"></span>
@@ -214,6 +221,7 @@
     <div class="tour-controls" id="tour-end" hidden>
       <button type="button" class="btn small primary" id="tour-replay">↺ Replay tour</button>
       <button type="button" class="btn small" id="tour-try">Try your own clip</button>
+      <button type="button" class="btn small ghost" id="tour-intro">Replay intro</button>
     </div>
   </section>
 </main>
@@ -228,6 +236,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"
         integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g=="
         crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-<script src="/static/app.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script defer src="/static/app.js"></script>
 </body>
 </html>
