@@ -20,7 +20,7 @@ List each kind of object that narrows or blocks the walking path, one entry per 
 Do not list people, shadows, road markings, or objects that are off the sidewalk.
 
 Reference.
-Four A4 sheets of plain paper lying flat on the ground, or a bright tactile paving strip, may be in view near the barrier for scale. Report whether you see one, in which frames, and where.
+Four A4 sheets of plain paper lying flat on the ground, or a bright tactile paving strip, may be in view near the barrier for scale. Report whether you see one, which one (kind "paper" for the sheets, "tactile paving" for a strip, "none" when you see neither), in which frames, and where.
 
 Path.
 Judge the walking path itself, not the objects one by one.
@@ -32,4 +32,4 @@ Reasons.
 Short sentences. When a check fails, say which and why. When all checks pass, say briefly what makes the clip usable.
 
 Output. Exactly this shape:
-{"checks": {"ground_visible": true, "barrier_visible": true, "sharp": true, "seated_height": true}, "reasons": ["..."], "barriers": [{"concept": "...", "frames": [0], "evidence": "..."}], "reference": {"visible": false, "frames": [], "evidence": "..."}, "path": {"state": "narrowed", "frames": [0], "evidence": "..."}}
+{"checks": {"ground_visible": true, "barrier_visible": true, "sharp": true, "seated_height": true}, "reasons": ["..."], "barriers": [{"concept": "...", "frames": [0], "evidence": "..."}], "reference": {"visible": false, "kind": "none", "frames": [], "evidence": "..."}, "path": {"state": "narrowed", "frames": [0], "evidence": "..."}}

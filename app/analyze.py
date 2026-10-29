@@ -490,7 +490,10 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
             seen.add(c)
             barriers.append(c)
     barriers = barriers[:MAX_BARRIERS]
-    ref_concept = "paper" if (tri.get("reference") or {}).get("visible") else "tactile paving"
+    # A4 sheets only when triage saw sheets; otherwise the tactile strip, which most Korean sidewalks have.
+    # (It asked for "paper" whenever any reference was seen, so a strip went to SAM as "paper": found on Seoul
+    # sidewalk footage, 2026-10-29.)
+    ref_concept = "paper" if spark.ref_kind(tri.get("reference") or {}) == "paper" else "tactile paving"
     step("sam", "start", concepts=[*barriers, ref_concept])
     results = await asyncio.gather(*[_segment(clip, c, info["frames"], replay, fixture_sha)
                                      for c in [*barriers, ref_concept]])

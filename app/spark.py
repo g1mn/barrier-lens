@@ -70,6 +70,20 @@ FIND_STEP_FREE_DETOUR = {
 TOOLS = [FIND_STEP_FREE_DETOUR]
 
 
+REF_KINDS = ("paper", "tactile paving", "none")
+
+
+def ref_kind(ref: dict) -> str:
+    """Which scale reference triage saw. Replies and recordings made before the "kind" field are read from the
+    evidence text, where a strip is always called tactile."""
+    if ref.get("kind") in REF_KINDS:
+        return ref["kind"]
+    if not ref.get("visible"):
+        return "none"
+    text = str(ref.get("evidence", "")).lower()
+    return "tactile paving" if "tactile" in text else "paper"
+
+
 async def find_step_free_detour(lat: float, lon: float) -> dict:
     """Handler for the tool above. Not built yet; nothing passes TOOLS to the model so far."""
     raise NotImplementedError("find_step_free_detour is a schema-only hook for now")
@@ -250,10 +264,11 @@ TRIAGE_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "visible": {"type": "boolean"},
+                    "kind": {"type": "string", "enum": list(REF_KINDS)},
                     "frames": {"type": "array", "items": {"type": "integer"}},
                     "evidence": {"type": "string"},
                 },
-                "required": ["visible", "frames", "evidence"],
+                "required": ["visible", "kind", "frames", "evidence"],
                 "additionalProperties": False,
             },
             "path": {
@@ -324,7 +339,7 @@ def _validate_triage(obj, n: int) -> tuple[dict, list[str], list[str]]:
     if not isinstance(ref, dict) or not isinstance(ref.get("visible"), bool):
         errors.append("reference must be an object with boolean visible")
         ref = {"visible": False, "frames": [], "evidence": ""}
-    ref = {"visible": ref["visible"], "frames": _frame_list(ref.get("frames", []), n, "reference", errors),
+    ref = {"visible": ref["visible"], "kind": ref_kind(ref), "frames": _frame_list(ref.get("frames", []), n, "reference", errors),
            "evidence": str(ref.get("evidence", "")).strip()}
     path = obj.get("path")
     if not isinstance(path, dict) or path.get("state") not in PATH_STATES:

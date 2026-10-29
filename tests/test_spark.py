@@ -34,3 +34,13 @@ def test_explain_falls_back_when_the_model_invents_a_number(monkeypatch):
     out = asyncio.run(spark.explain(dict(MEASUREMENT)))
     assert out["model"] == "template" and out["text"] == spark._template(MEASUREMENT)
     assert any("120" in w for w in out["warnings"])
+
+
+def test_reference_kind_picks_the_strip_over_paper():
+    # a tactile strip must go to SAM as "tactile paving", not "paper" (Seoul sidewalks, 2026-10-29)
+    assert spark.ref_kind({"visible": True, "kind": "tactile paving"}) == "tactile paving"
+    assert spark.ref_kind({"visible": True, "evidence": "A yellow tactile paving strip runs across the foreground"}) == "tactile paving"
+    assert spark.ref_kind({"visible": True, "evidence": "Four A4 sheets on the ground"}) == "paper"
+    assert spark.ref_kind({"visible": False, "evidence": "No paper sheets or tactile paving strip"}) == "none"
+    ref_schema = spark.TRIAGE_SCHEMA["schema"]["properties"]["reference"]
+    assert "kind" in ref_schema["required"] and ref_schema["properties"]["kind"]["enum"] == list(spark.REF_KINDS)
