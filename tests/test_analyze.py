@@ -467,3 +467,68 @@ def test_stream_reports_each_stage_then_the_result(env, scene, clip_src, monkeyp
     assert stages == [(s, st) for s in ("blur", "triage", "sam", "measure", "explain") for st in ("start", "done")]
     assert events[-1]["result"]["verdict"] == "passes"
     assert next(e for e in events if e.get("stage") == "sam" and e["status"] == "done")["outlined"]["bollard"] > 0
+
+
+def test_closed_path_with_no_barriers_is_blocked(env, clip_src):
+    """A path Muse Spark saw closed comes back blocked, not unknown, when triage names no barriers."""
+    async def seed():
+        clip, _, _ = await analyze.prepare(clip_src)
+        jpgs, _ = analyze.triage_frames(clip, analyze.clip_info(clip)["frames"])
+        h = hashlib.sha256()
+        for j in jpgs:
+            h.update(hashlib.sha256(j).digest())
+        spark._cache_put("triage", h.hexdigest(), {
+            "checks": {"ground_visible": True, "barrier_visible": False, "sharp": True, "seated_height": True},
+            "reasons": ["the sidewalk is closed"], "barriers": [],
+            "reference": {"visible": False, "frames": [], "evidence": ""},
+            "path": {"state": "closed", "frames": [0], "evidence": "SIDEWALK CLOSED sign across it"},
+            "model": "test-fixture", "warnings": []})
+    asyncio.run(seed())
+    r = asyncio.run(analyze.analyze(clip_src, None, None, replay=True))
+    assert r["verdict"] == "blocked" and "closed" in r["why"].lower()
+
+
+def test_spark_ledger_prices_token_usage(env, monkeypatch):
+    """A ledgered triage call prices its tokens, and the spend cap then counts it."""
+    monkeypatch.setattr(spark, "_backend",
+                        lambda: spark.Backend("meta", "u", "muse-spark-1.3", "k", "max_completion_tokens"))
+
+    async def fake_triage(jpgs, meta):
+        return {"model": "muse-spark-1.3", "barriers": [],
+                "call": {"usage": {"prompt_tokens": 1000, "completion_tokens": 2000, "reasoning_tokens": 500}}}
+    monkeypatch.setattr(spark, "triage", fake_triage)
+    asyncio.run(analyze._triage([], {}, False))
+    entry = json.loads((env / "ledger.jsonl").read_text().strip())
+    assert entry["usd"] == pytest.approx(1000 / 1e6 * 1.25 + 2000 / 1e6 * 4.25)
+    assert analyze.spent_usd() == pytest.approx(entry["usd"])
+    monkeypatch.setenv("BL_SPEND_CAP_USD", "0.009")
+    with pytest.raises(analyze.SpendCapError):
+        analyze._check_cap(0.0, "anything")
+
+
+def test_chat_malformed_200_is_a_spark_error(monkeypatch):
+    """A 200 with no usable body raises SparkError, not the KeyError the API maps to 500."""
+    class _Resp:
+        status_code = 200
+        text = "{}"
+
+        def json(self):
+            return {}
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, *a, **k):
+            return _Resp()
+
+    monkeypatch.setattr(spark.httpx, "AsyncClient", _Client)
+    b = spark.Backend("meta", "u", "muse-spark-1.3", "k", "max_completion_tokens")
+    with pytest.raises(spark.SparkError, match="malformed"):
+        asyncio.run(spark._chat(b, [], None, "low"))

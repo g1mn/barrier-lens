@@ -64,7 +64,9 @@ The known-camera clip is 10 s of the [SANPO](https://github.com/google-research-
 
 ## Tests
 
-119 tests (`tests/`): geometry on synthetic scenes with known truth, the error-band and verdict rules, the straight-ahead gap rule, camera-pose solving, SAM replay fixtures, the explanation's number and cause checks, the path-closed and default-pass rules, the streaming route and the demo-token gate.
+124 tests (`tests/`): geometry on synthetic scenes with known truth, the error-band and verdict rules, the straight-ahead gap rule, camera-pose solving, SAM replay fixtures, the explanation's number and cause checks, the path-closed and default-pass rules, the streaming route and the demo-token gate.
+
+**Pre-freeze review by Muse Code** (Meta's coding agent, `muse exec` with `muse-spark-1.3`, Oct 29): it read the pipeline, ran the tests and reported six defects; all six checked out against the code. It then wrote the fixes for five of them, with one test each, in its own git worktree; we reviewed the diff and applied it unchanged: a sidewalk Muse Spark saw closed is now *blocked* even when no barrier is named (it was *unknown*); the tactile-strip mode now uses the straight-ahead rule (it still chose the widest corridor anywhere); the Monte Carlo band matches each draw's passage by label, not position; Muse Spark calls are priced in the spend ledger so the cap counts them; a malformed model reply is a 502, not a 500. The sixth (upload file type) was left as is: uploads already need the judge token, and a suffix check would not stop a crafted file.
 
 ```bash
 python3.13 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt

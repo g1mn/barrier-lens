@@ -297,6 +297,14 @@ def _gaps_out(passages) -> list[dict]:
     return [{"between": lab, "cm": round(d, 1), "ahead": a} for lab, d, a in passages]
 
 
+def _by_label(passages, label):
+    """Draw distance for the nominal passage label, or None when the draw reordered it away."""
+    for lab, d, *_ in passages:
+        if lab == label:
+            return d
+    return None
+
+
 NONE_AHEAD = ("no gap between the outlined barriers lies straight ahead of the camera, so there is no width to measure: "
               "film facing the gap you want to pass, with both sides of it in view")
 
@@ -349,7 +357,7 @@ def measure_gap(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
     if ground_ref.get("kind") == "tactile_strip":
         return measure_gap_strip(ground_ref, barrier_masks, frame_size, wheelchair_cm=wheelchair_cm,
                                  clearance_cm=clearance_cm, walkway_edge=walkway_edge, contact_px=contact_px,
-                                 n_draws=n_draws, seed=seed)
+                                 n_draws=n_draws, seed=seed, ahead_only=ahead_only)
 
     # reference corners
     try:
@@ -439,7 +447,11 @@ def measure_gap(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
         if r is None or len(r) != len(nominal):
             bad += 1
             continue
-        draws.append(r[best][1])
+        d = _by_label(r, nominal[best][0])
+        if d is None:  # the draw reordered the neighbours: not the same pair
+            bad += 1
+            continue
+        draws.append(d)
     if bad > MAX_BAD_DRAW_FRACTION * n_draws:
         return _unknown(f"homography ill-conditioned: {bad} of {n_draws} perturbed draws put contacts behind the "
                         f"horizon -- the reference ({sides.min():.0f} px shortest side) is too small or too far from the barriers; film closer or use a bigger reference (a block strip or four A4 sheets)", ref_px=corners.tolist())
@@ -584,24 +596,29 @@ class _StripRuler:
         return None if abs(self.V[2]) < 1e-12 else (self.V[:2] / self.V[2]).tolist()
 
 
-def _strip_passages(xsets: list[np.ndarray], edge_x: np.ndarray | None, labels: list[str]):
-    """Neighbour corridors across the walkway, left to right: [(label, cm)] (negative = overlapping, i.e. none)."""
+def _strip_passages(xsets: list[np.ndarray], edge_x: np.ndarray | None, labels: list[str],
+                  left: list[bool] | None):
+    """Neighbour corridors across the walkway, left to right: [(label, cm, ahead)] (negative = overlapping).
+    ahead = the pair spans the line of travel, same rule as _passages (all of them when left is None)."""
     order = np.argsort([np.median(x) for x in xsets])
-    out = [(f"{labels[i]}|{labels[j]}", float(xsets[j].min() - xsets[i].max())) for i, j in zip(order[:-1], order[1:])]
+    out = [(f"{labels[i]}|{labels[j]}", float(xsets[j].min() - xsets[i].max()),
+            left is None or (left[i] and not left[j])) for i, j in zip(order[:-1], order[1:])]
     if edge_x is not None and len(xsets):
         if np.median(edge_x) < np.median(xsets[order[0]]):
             k = order[0]
-            out.append((f"edge|{labels[k]}", float(xsets[k].min() - edge_x.max())))
+            out.append((f"edge|{labels[k]}", float(xsets[k].min() - edge_x.max()),
+                        left is None or not left[k]))
         else:
             k = order[-1]
-            out.append((f"{labels[k]}|edge", float(edge_x.min() - xsets[k].max())))
+            out.append((f"{labels[k]}|edge", float(edge_x.min() - xsets[k].max()),
+                        left is None or left[k]))
     return out
 
 
 def measure_gap_strip(ground_ref: dict, barrier_masks: list, frame_size: tuple, *,
                       wheelchair_cm: float = DEFAULT_WHEELCHAIR_CM, clearance_cm: float = DEFAULT_CLEARANCE_CM,
                       walkway_edge=None, contact_px: float = 1.0, edge_px: float = 1.0, roll_deg: float = 1.0,
-                      n_draws: int = 400, seed: int = 0) -> dict:
+                      n_draws: int = 400, seed: int = 0, ahead_only: bool = True) -> dict:
     """Clear corridor across the walkway, from a tactile strip of known width (see the section comment above).
 
     Monte Carlo per draw: each edge line is refit through its two end anchors (top and bottom used rows), each moved
@@ -660,10 +677,13 @@ def measure_gap_strip(ground_ref: dict, barrier_masks: list, frame_size: tuple, 
             ex, ok = r.X(epts)
             if not ok.all():
                 return None
-        return _strip_passages(xs, ex, labels)
+        return _strip_passages(xs, ex, labels, left)
 
+    left = _left_of_centre(contacts, W) if ahead_only else None
     nominal = run(ruler, contacts, edge_pts)
-    best = int(np.argmax([d for _, d in nominal]))
+    best = _widest(nominal)
+    if best is None:
+        return _unknown(NONE_AHEAD, gaps=_gaps_out(nominal))
     gap = nominal[best][1]
 
     # the pair (or barrier + edge) that makes the chosen corridor, and the image rows where it is pinched
@@ -699,7 +719,11 @@ def measure_gap_strip(ground_ref: dict, barrier_masks: list, frame_size: tuple, 
         if r is None or len(r) != len(nominal):
             bad += 1
             continue
-        draws.append(r[best][1] * (1.0 + rng.normal(0.0, ext_sig)) if ext_sig > 0 else r[best][1])
+        d = _by_label(r, nominal[best][0])
+        if d is None:  # the draw reordered the neighbours: not the same pair
+            bad += 1
+            continue
+        draws.append(d * (1.0 + rng.normal(0.0, ext_sig)) if ext_sig > 0 else d)
     if bad > MAX_BAD_DRAW_FRACTION * n_draws:
         return _unknown(f"strip ruler ill-conditioned: {bad} of {n_draws} perturbed draws put contacts behind the "
                         "horizon -- film closer or with more of the strip in view")
@@ -739,7 +763,7 @@ def measure_gap_strip(ground_ref: dict, barrier_masks: list, frame_size: tuple, 
                    f"(strip covers rows {y_top:.0f}-{y_bot:.0f}); band widened")
     return {
         "gap_cm": round(gap, 1), "band_cm": [round(lo, 1), round(hi, 1)], "verdict": verdict, "why": "; ".join(why),
-        "detail": {"gaps": [{"between": lab, "cm": round(d, 1)} for lab, d in nominal], "chosen": nominal[best][0],
+        "detail": {"gaps": _gaps_out(nominal), "chosen": nominal[best][0],
                    "ref": "tactile_strip", "ref_cm": width_cm, "measure": "across-walkway corridor",
                    "strip_edges": {"left": edges["left"].round(5).tolist(), "right": edges["right"].round(5).tolist(),
                                    "rows": [round(y_top, 1), round(y_bot, 1)], "rows_used": edges["rows_used"],
@@ -1092,7 +1116,11 @@ def measure_gap_pose(ground_ref: dict, barrier_masks: list, frame_size: tuple, *
             if r is None or len(r) != len(nominal):
                 bad += 1
                 continue
-            out.append(r[best][1])
+            d = _by_label(r, nominal[best][0])
+            if d is None:  # the draw reordered the neighbours: not the same pair
+                bad += 1
+                continue
+            out.append(d)
         return np.asarray(out), bad
 
     draws, bad = simulate(n_draws, set(POSE_SOURCES))

@@ -186,6 +186,24 @@ def test_strip_sam_object_inputs():
     assert r["band_cm"][0] <= 70 <= r["band_cm"][1]
 
 
+def test_strip_picks_the_corridor_straight_ahead():
+    """Three barriers where the widest corridor sits left of the centre line: the narrower centre one is chosen."""
+    xs = [np.array([0.0, 1.0]), np.array([30.0, 31.0]), np.array([33.0, 34.0])]  # gaps 29 vs 2
+    p = geometry._strip_passages(xs, None, ["b0", "b1", "b2"], [True, True, False])
+    assert [a for _, _, a in p] == [False, True]
+    assert geometry._widest(p) == 1 and p[1][0] == "b1|b2"
+    assert geometry._gaps_out(p)[1] == {"between": "b1|b2", "cm": 2.0, "ahead": True}
+    e = geometry._strip_passages(xs, np.array([-5.0, -4.0]), ["b0", "b1", "b2"], [True, True, False])
+    assert e[-1][0] == "edge|b0" and e[-1][2] is False  # edge on the closed side
+
+
+def test_draw_passage_matched_by_label_not_position():
+    """A perturbed draw that reorders the neighbours must not lend its distance to the nominal pair."""
+    nominal = [("b0|b1", 90.0, True), ("b1|b2", 50.0, True)]
+    assert geometry._by_label([("b1|b2", 51.0, True), ("b0|b1", 91.0, True)], nominal[0][0]) == 91.0
+    assert geometry._by_label([("b0|b2", 40.0, True)], nominal[0][0]) is None  # pair gone: a bad draw
+
+
 def teardown_module(module):
     if not ROWS:
         return

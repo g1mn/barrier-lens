@@ -19,7 +19,7 @@ Money
   replay mode, so no paid call can happen.
 - Every paid call is appended to data/cache/ledger.jsonl. Before each one, the ledger total plus that call's
   estimate is checked against BL_SPEND_CAP_USD (default 5); over the cap -> SpendCapError, nothing is sent.
-  Spark calls are logged with token usage and usd None: no per-token price is recorded in this repo.
+  Spark calls are priced from token usage at SPARK_USD_PER_MTOK so the cap accrues them.
 """
 from __future__ import annotations
 
@@ -61,6 +61,19 @@ CONCEPT_ALIASES = {"e-scooter": "scooter", "electric scooter": "scooter", "kick 
 REF_CONCEPTS = ("paper", "tactile paving")
 POLY_EPS_PX = 1.5
 MIN_POLY_AREA_PX = 12.0
+# Muse Spark list prices per million tokens (input, output); completion tokens include reasoning tokens.
+SPARK_USD_PER_MTOK = {"muse-spark-1.3": (1.25, 4.25), "muse-spark-1.2": (1.25, 4.25),
+                      "muse-spark-1.1": (1.25, 4.25), "muse-spark-1.3-contributor": (0.10, 0.20),
+                      "muse-spark-1.2-contributor": (0.10, 0.20), "muse-spark-1.1-contributor": (0.10, 0.20)}
+
+
+def _spark_usd(model: str | None, usage: dict | None) -> float | None:
+    """Ledger price for a Muse Spark call from its token usage, or None when unknown."""
+    rates = SPARK_USD_PER_MTOK.get((model or "").split(" (")[0])  # drop a " (replay)" suffix
+    if rates is None or not usage:
+        return None
+    return round(((usage.get("prompt_tokens") or 0) * rates[0] + (usage.get("completion_tokens") or 0) * rates[1])
+                  / 1e6, 6)
 
 
 class AnalyzeError(RuntimeError):
@@ -277,7 +290,8 @@ async def _triage(jpgs: list[bytes], meta: dict, replay: bool) -> dict:
         return await spark.triage(jpgs, meta)
     _check_cap(0.0, "Muse Spark triage")
     out = await spark.triage(jpgs, meta)
-    _ledger({"kind": "spark.triage", "backend": backend.name, "model": out.get("model"), "usd": None,
+    _ledger({"kind": "spark.triage", "backend": backend.name, "model": out.get("model"),
+             "usd": _spark_usd(out.get("model"), (out.get("call") or {}).get("usage")),
              "usage": (out.get("call") or {}).get("usage")})
     return out
 
@@ -291,7 +305,8 @@ async def _explain(measurement: dict, replay: bool) -> dict:
         _check_cap(0.0, "Muse Spark explain")
     out = await spark.explain(measurement)
     if backend.name != "replay" and out.get("call"):
-        _ledger({"kind": "spark.explain", "backend": backend.name, "model": out.get("model"), "usd": None,
+        _ledger({"kind": "spark.explain", "backend": backend.name, "model": out.get("model"),
+                 "usd": _spark_usd(out.get("model"), out["call"].get("usage")),
                  "usage": out["call"].get("usage")})
     return out
 
@@ -462,7 +477,8 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
                if tri.get("usable") is False else
                "Nothing to measure: " + " ".join(tri.get("reasons") or ["no barrier was named."]))
         timings["total_s"] = round(time.monotonic() - t0, 2)
-        return _result(base, _unknown(why), None, tri, [], models, timings, notes, 0)
+        m0 = apply_path_and_mode(_unknown(why), tri, "default")  # a closed path is blocked, even with no barriers
+        return _result(base, m0, None, tri, [], models, timings, notes, 0)
 
     # SAM: barriers (cap) + one reference
     t = time.monotonic()

@@ -142,11 +142,15 @@ async def _chat(b: Backend, messages: list[dict], schema: dict | None, effort: s
     latency = time.monotonic() - t0
     if r.status_code != 200:
         raise SparkError(f"{b.name}: HTTP {r.status_code}: {r.text[:300]}")
-    j = r.json()
-    choice = j["choices"][0]
-    u = j.get("usage") or {}
+    try:
+        j = r.json()
+        choice = j["choices"][0]
+        u = j.get("usage") or {}
+        content = choice["message"].get("content") or ""
+    except (ValueError, KeyError, IndexError, TypeError, AttributeError) as e:
+        raise SparkError(f"{b.name}: malformed response {r.text[:100]!r}") from e
     return {
-        "content": choice["message"].get("content") or "",
+        "content": content,
         "finish": choice.get("finish_reason"),
         "model": j.get("model") or b.model,
         "latency_s": round(latency, 2),
