@@ -410,7 +410,7 @@ UNKNOWN_EXPLANATION = ("We could not measure this gap, so we cannot say whether 
 async def analyze(video_path: str | Path, lat: float | None, lon: float | None, replay: bool = False, *,
                   concepts_hint: list[str] | None = None, fixture_sha: str | None = None,
                   require_seated_height: bool = True, sample: bool = False, profile: dict | None = None,
-                  sensor: dict | None = None, progress=None) -> dict:
+                  sensor: dict | None = None, progress=None, lang: str = "en") -> dict:
     """Run the whole check on one clip. See the module docstring.
 
     profile: the user's calibration profile (app.calibration.clean_profile fields: chair width, armrest height,
@@ -554,6 +554,8 @@ async def analyze(video_path: str | Path, lat: float | None, lon: float | None, 
     step("explain", "start")
     ex_in = {k: m.get(k) for k in ("gap_cm", "band_cm", "verdict", "why")}
     ex_in.update({"chair_width_cm": chair_cm, "barrier": ", ".join(barriers) or None})
+    if lang != "en":  # the page's language (spark.LANGS); English keeps the recorded runs' cache keys
+        ex_in["lang"] = lang
     cause = unknown_cause(m)
     if cause:
         ex_in.update({"reason": cause["reason"], "next_step": cause["next_step"]})

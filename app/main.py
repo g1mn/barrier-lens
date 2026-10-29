@@ -81,6 +81,7 @@ async def api_analyze(
     replay: bool = Form(False, description="cached/fixture results only, never a paid call"),
     profile: str | None = Form(None, description="JSON calibration profile (app/calibration.py clean_profile)"),
     sensor: str | None = Form(None, description="JSON averaged DeviceOrientation {beta, gamma, angle, n}"),
+    lang: str = Form("en", description="language of the explanation (app/spark.py LANGS)"),
     x_demo_token: str | None = Header(None, description="judge token, needed for live checks when BL_DEMO_TOKEN is set"),
 ) -> dict:
     """Upload a clip -> normalise, blur faces locally, triage, SAM, geometry, explanation (see app/analyze.py)."""
@@ -101,7 +102,7 @@ async def api_analyze(
         if size == 0:
             raise HTTPException(400, "empty upload")
         return await _analyze.analyze(tmp, lat, lon, replay=replay, profile=_cal.parse_json(profile),
-                                      sensor=_cal.parse_json(sensor))
+                                      sensor=_cal.parse_json(sensor), lang=lang if lang in _spark.LANGS else "en")
     except _analyze.AnalyzeError as e:
         raise HTTPException(422, str(e)) from None
     except _analyze.SpendCapError as e:
@@ -121,6 +122,7 @@ async def api_analyze_stream(
     lon: float = Form(..., ge=-180, le=180),
     profile: str | None = Form(None),
     sensor: str | None = Form(None),
+    lang: str = Form("en"),
     x_demo_token: str | None = Header(None),
 ):
     """The live check as NDJSON lines: {"stage", "status", ...} at each stage boundary, then {"result": ...} or
@@ -154,8 +156,8 @@ async def api_analyze_stream(
 
     async def run() -> None:
         try:
-            res = await _analyze.analyze(tmp, lat, lon, profile=_cal.parse_json(profile),
-                                         sensor=_cal.parse_json(sensor), progress=q.put_nowait)
+            res = await _analyze.analyze(tmp, lat, lon, profile=_cal.parse_json(profile), sensor=_cal.parse_json(sensor),
+                                         progress=q.put_nowait, lang=lang if lang in _spark.LANGS else "en")
             q.put_nowait({"result": res})
         except Exception as e:  # mapped like POST /api/analyze; anything else is a 500
             code, prefix = next(((c, p) for t, c, p in errors if isinstance(e, t)), (500, "internal error: "))

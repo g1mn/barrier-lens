@@ -16,24 +16,39 @@
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<a class="skip" href="#sheet">Skip to “Check a spot”</a>
+<a class="skip" href="#sheet" data-i18n>Skip to “Check a spot”</a>
 
 <header class="bar">
   <div class="brand">
     <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7"/><path d="M9 7v18M23 7v18" class="brand-posts"/><path d="M12.5 16h7" class="brand-gap"/></svg>
     <div>
       <h1>Barrier Lens</h1>
-      <p class="tagline">Does the chair fit past it?</p>
+      <p class="tagline" data-i18n>Does the chair fit past it?</p>
     </div>
   </div>
-  <button type="button" class="btn small tour-btn" id="tour-btn" aria-label="1-minute tour">▶ <span class="tour-full">1-minute tour</span><span class="tour-short">Tour</span></button>
+  <button type="button" class="btn small tour-btn" id="tour-btn" aria-label="1-minute tour" data-i18n-attr="aria-label">▶ <span class="tour-full" data-i18n>1-minute tour</span><span class="tour-short" data-i18n>Tour</span></button>
+  <button type="button" class="lang-btn" id="lang-btn" popovertarget="prefs" aria-label="Language and intro" data-i18n-attr="aria-label">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5M12 3.5C9.4 5.9 8.2 8.7 8.2 12s1.2 6.1 3.8 8.5"/></svg>
+    <span id="lang-code">EN</span>
+  </button>
+  <button type="button" class="icon-btn" id="intro-toggle" aria-pressed="true" aria-label="Intro plays on every load. Turn it off" title="Intro plays on every load. Turn it off">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path class="i-play" d="M10 8.5v7l5.5-3.5z"/><path class="i-off" d="M4 4l16 16"/></svg>
+  </button>
   <button type="button" class="icon-btn" id="theme-toggle" aria-pressed="true" aria-label="Dark theme on. Switch to light theme">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-moon" d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/><g class="i-sun"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></svg>
   </button>
 </header>
 
+<div class="prefs" id="prefs" popover>
+  <fieldset class="prefs-langs">
+    <legend data-i18n>Language</legend>
+    <div class="lang-list" id="lang-list"></div>
+  </fieldset>
+  <label class="prefs-intro"><input type="checkbox" id="intro-pref" checked> <span data-i18n>Play the intro on every load</span></label>
+</div>
+
 <main>
-  <div id="map" role="region" aria-label="Map around Gwanghwamun and Gyeongbokgung, Seoul. The dashed ring marks the area whose towing reports are counted; numbered markers show station exits."></div>
+  <div id="map" role="region" aria-label="Map around Gwanghwamun and Gyeongbokgung, Seoul. The dashed ring marks the area whose towing reports are counted; numbered markers show station exits." data-i18n-attr="aria-label"></div>
   <div class="crosshair" id="crosshair" hidden aria-hidden="true"><span></span></div>
 
   <div id="intro" hidden>
@@ -41,7 +56,7 @@
     <canvas id="intro-fx" aria-hidden="true"></canvas>
     <div class="iv-heads" id="iv-heads" aria-hidden="true"></div>
     <div class="iv-crumbs" id="iv-crumbs" aria-hidden="true">
-      <ol><li>Earth</li><li>East Asia</li><li>South Korea</li><li>Seoul</li><li>Gwanghwamun Gate</li></ol>
+      <ol><li data-i18n>Earth</li><li data-i18n>East Asia</li><li data-i18n>South Korea</li><li data-i18n>Seoul</li><li data-i18n>Gwanghwamun Gate</li></ol>
       <p class="iv-coords" id="iv-coords"></p>
     </div>
     <figure class="iv-cam" id="iv-cam" aria-hidden="true">
@@ -54,21 +69,21 @@
         <div class="iv-flash" id="iv-flash"></div>
         <ul class="iv-tags" id="iv-tags"></ul>
         <p class="iv-hud"><span class="iv-rec">REC</span><span id="iv-hud-cam"></span></p>
-        <p class="iv-verdict" id="iv-verdict"><svg aria-hidden="true"><use href="#v-passes"/></svg><b>Passes</b><span id="iv-verdict-cm"></span></p>
+        <p class="iv-verdict" id="iv-verdict"><svg aria-hidden="true"><use href="#v-passes"/></svg><b data-i18n>Passes</b><span id="iv-verdict-cm"></span></p>
       </div>
       <ol class="iv-rail" id="iv-rail">
-        <li><span class="iv-long">Blur faces</span><span class="iv-short">Blur</span></li>
-        <li><span class="iv-long">Muse Spark reads</span><span class="iv-short">Spark</span></li>
-        <li><span class="iv-long">SAM 3.1 outlines</span><span class="iv-short">SAM 3.1</span></li>
-        <li><span class="iv-long">Geometry measures</span><span class="iv-short">Measure</span></li>
-        <li><span class="iv-long">Muse Spark explains</span><span class="iv-short">Explain</span></li>
+        <li><span class="iv-long" data-i18n>Blur faces</span><span class="iv-short" data-i18n>Blur</span></li>
+        <li><span class="iv-long" data-i18n>Muse Spark reads</span><span class="iv-short" data-i18n>Spark</span></li>
+        <li><span class="iv-long" data-i18n>SAM 3.1 outlines</span><span class="iv-short" data-i18n>SAM 3.1</span></li>
+        <li><span class="iv-long" data-i18n>Geometry measures</span><span class="iv-short" data-i18n>Measure</span></li>
+        <li><span class="iv-long" data-i18n>Muse Spark explains</span><span class="iv-short" data-i18n>Explain</span></li>
       </ol>
       <p class="iv-say" id="iv-say"></p>
-      <figcaption class="iv-credit">Sample clip: a New York sidewalk, from SANPO (Google Research, CC BY 4.0)</figcaption>
+      <figcaption class="iv-credit" data-i18n>Sample clip: a New York sidewalk, from SANPO (Google Research, CC BY 4.0)</figcaption>
     </figure>
-    <p class="iv-mapcredit" id="iv-mapcredit">&copy; OpenStreetMap contributors · Natural Earth · MapLibre</p>
-    <button type="button" class="btn small intro-skip" id="intro-skip">Skip intro</button>
-    <p class="visually-hidden" role="status">Intro: where Gwanghwamun Gate is, in Seoul, South Korea, then one recorded check of a sidewalk.</p>
+    <p class="iv-mapcredit" id="iv-mapcredit">&copy; OpenStreetMap contributors · OpenMapTiles · OpenFreeMap · Natural Earth · MapLibre</p>
+    <button type="button" class="btn small intro-skip" id="intro-skip" data-i18n>Skip intro</button>
+    <p class="visually-hidden" role="status" data-i18n>Intro: where Gwanghwamun Gate is, in Seoul, South Korea, then one recorded check of a sidewalk.</p>
   </div>
 
   <section class="sheet" id="sheet" aria-labelledby="sheet-title" data-state="peek" tabindex="-1">
@@ -78,14 +93,14 @@
     </button>
 
     <div class="sheet-head">
-      <h2 id="sheet-title">Gwanghwamun &amp; Gyeongbokgung</h2>
-      <p class="sub" id="station-line" aria-live="polite">Loading exit elevator status…</p>
+      <h2 id="sheet-title" data-i18n>Gwanghwamun &amp; Gyeongbokgung</h2>
+      <p class="sub" id="station-line" aria-live="polite" data-i18n>Loading exit elevator status…</p>
     </div>
 
     <div class="sheet-actions">
       <button type="button" class="btn primary" id="check-btn">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
-        Check a spot
+        <span data-i18n>Check a spot</span>
       </button>
     </div>
 
@@ -94,18 +109,18 @@
       <!-- Overview: towing history -->
       <div class="panel" id="panel-overview">
         <fieldset class="seg">
-          <legend>Towing reports within</legend>
+          <legend data-i18n>Towing reports within</legend>
           <div class="seg-row">
             <input type="radio" name="radius" id="r300" value="300"><label for="r300">300 m</label>
             <input type="radio" name="radius" id="r500" value="500" checked><label for="r500">500 m</label>
             <input type="radio" name="radius" id="r1000" value="1000"><label for="r1000">1 km</label>
           </div>
         </fieldset>
-        <p class="stat" id="towing-stat" aria-live="polite">Loading towing history…</p>
-        <h3 class="h3">Busiest spots</h3>
+        <p class="stat" id="towing-stat" aria-live="polite" data-i18n>Loading towing history…</p>
+        <h3 class="h3" data-i18n>Busiest spots</h3>
         <ol class="hotspots" id="hotspots"></ol>
         <details class="about">
-          <summary>About this data</summary>
+          <summary data-i18n>About this data</summary>
           <ul id="caveats"></ul>
         </details>
       </div>
@@ -113,93 +128,93 @@
       <!-- Check a spot -->
       <div class="panel" id="panel-check" hidden>
         <details class="calib" id="calib">
-          <summary><span>Calibrate (once)</span> <span class="calib-state" id="calib-state">Default assumptions</span></summary>
+          <summary><span data-i18n>Calibrate (once)</span> <span class="calib-state" id="calib-state">Default assumptions</span></summary>
           <form id="calib-form" novalidate>
             <fieldset class="seg">
-              <legend>Wheelchair</legend>
+              <legend data-i18n>Wheelchair</legend>
               <div class="seg-row">
-                <input type="radio" name="chair" id="ch-manual" value="manual" checked><label for="ch-manual">Manual</label>
-                <input type="radio" name="chair" id="ch-power" value="power"><label for="ch-power">Power</label>
-                <input type="radio" name="chair" id="ch-custom" value="custom"><label for="ch-custom">Custom</label>
+                <input type="radio" name="chair" id="ch-manual" value="manual" checked><label for="ch-manual" data-i18n>Manual</label>
+                <input type="radio" name="chair" id="ch-power" value="power"><label for="ch-power" data-i18n>Power</label>
+                <input type="radio" name="chair" id="ch-custom" value="custom"><label for="ch-custom" data-i18n>Custom</label>
               </div>
             </fieldset>
             <div class="field-row">
-              <label class="field">Width, cm
+              <label class="field"><span data-i18n>Width, cm</span>
                 <input type="number" id="cal-width" inputmode="decimal" min="40" max="100" step="1" value="65" aria-describedby="cal-width-hint">
               </label>
-              <label class="field">Armrest height, cm
+              <label class="field"><span data-i18n>Armrest height, cm</span>
                 <input type="number" id="cal-armrest" inputmode="decimal" min="40" max="130" step="1" value="75">
               </label>
             </div>
-            <p class="hint" id="cal-width-hint">Typical: manual 60–70 cm, power 65–75 cm. Measure the widest point, wheels and push rims included.</p>
-            <label class="field">Phone model (optional)
-              <input type="text" id="cal-phone" maxlength="60" autocomplete="off" placeholder="e.g. Galaxy S24">
+            <p class="hint" id="cal-width-hint" data-i18n>Typical: manual 60–70 cm, power 65–75 cm. Measure the widest point, wheels and push rims included.</p>
+            <label class="field"><span data-i18n>Phone model (optional)</span>
+              <input type="text" id="cal-phone" maxlength="60" autocomplete="off" placeholder="e.g. Galaxy S24" data-i18n-attr="placeholder">
             </label>
-            <label class="field">Main camera focal length, 35 mm equivalent (optional)
+            <label class="field"><span data-i18n>Main camera focal length, 35 mm equivalent (optional)</span>
               <input type="number" id="cal-focal" inputmode="decimal" min="10" max="80" step="0.5" placeholder="26">
             </label>
             <div class="row">
-              <button type="submit" class="btn primary small">Save profile</button>
-              <button type="button" class="btn small" id="cal-reset">Reset</button>
+              <button type="submit" class="btn primary small" data-i18n>Save profile</button>
+              <button type="button" class="btn small" id="cal-reset" data-i18n>Reset</button>
             </div>
             <fieldset class="calib-ref">
-              <legend>Film a reference once (optional, tightens every later check)</legend>
+              <legend data-i18n>Film a reference once (optional, tightens every later check)</legend>
               <div class="seg-row">
-                <input type="radio" name="refkind" id="rk-a4" value="a4x4" checked><label for="rk-a4">4 × A4, 2×2</label>
-                <input type="radio" name="refkind" id="rk-block" value="tactile_block"><label for="rk-block">1 tactile block</label>
+                <input type="radio" name="refkind" id="rk-a4" value="a4x4" checked><label for="rk-a4" data-i18n>4 × A4, 2×2</label>
+                <input type="radio" name="refkind" id="rk-block" value="tactile_block"><label for="rk-block" data-i18n>1 tactile block</label>
               </div>
-              <p class="hint">Lay it flat on the ground about 2 m ahead. Hold the phone where you usually do, at your armrest, and film 3 seconds.</p>
-              <input type="file" id="cal-clip" accept="video/*" capture="environment" aria-label="Reference clip">
-              <button type="button" class="btn small" id="cal-run" disabled>Solve height and tilt</button>
+              <p class="hint" data-i18n>Lay it flat on the ground about 2 m ahead. Hold the phone where you usually do, at your armrest, and film 3 seconds.</p>
+              <input type="file" id="cal-clip" accept="video/*" capture="environment" aria-label="Reference clip" data-i18n-attr="aria-label">
+              <button type="button" class="btn small" id="cal-run" disabled data-i18n>Solve height and tilt</button>
             </fieldset>
             <p class="status" id="calib-status" role="status" aria-live="polite"></p>
           </form>
         </details>
         <div class="row tilt-row" id="tilt-row" hidden>
-          <button type="button" class="btn small" id="tilt-btn" aria-pressed="false">Use phone tilt</button>
-          <span class="hint" id="tilt-state">Tilt sensor off: tilt is estimated from the clip.</span>
+          <button type="button" class="btn small" id="tilt-btn" aria-pressed="false" data-i18n>Use phone tilt</button>
+          <span class="hint" id="tilt-state" data-i18n>Tilt sensor off: tilt is estimated from the clip.</span>
         </div>
         <ol class="steps">
           <li>
-            <label class="step-label" for="clip">1. Film about 10 seconds at seated height, or choose a clip</label>
+            <label class="step-label" for="clip" data-i18n>1. Film about 10 seconds at seated height, or choose a clip</label>
             <input type="file" id="clip" accept="video/*" capture="environment">
-            <p class="hint">Keep the whole gap and both sides of it in view. A wheel or another object of known size in the shot lets us measure.</p>
+            <p class="hint" data-i18n>Keep the whole gap and both sides of it in view. A wheel or another object of known size in the shot lets us measure.</p>
           </li>
           <li>
-            <p class="step-label" id="pin-label">2. Where is it?</p>
-            <p class="hint" id="pin-hint">The pin goes under the crosshair. Move the map to place it.</p>
+            <p class="step-label" id="pin-label" data-i18n>2. Where is it?</p>
+            <p class="hint" id="pin-hint" data-i18n>The pin goes under the crosshair. Move the map to place it.</p>
           </li>
           <li>
-            <p class="step-label">3. Measure</p>
+            <p class="step-label" data-i18n>3. Measure</p>
             <div class="row">
-              <button type="button" class="btn primary" id="analyze-btn" disabled>Measure the gap</button>
-              <button type="button" class="btn" id="sample-btn" data-sample="scooters">Try a sample</button>
-              <button type="button" class="btn" id="sample-closed-btn" data-sample="closed">Sample: closed sidewalk</button>
-              <button type="button" class="btn" id="sample-known-btn" data-sample="known">Sample: known camera</button>
+              <button type="button" class="btn primary" id="analyze-btn" disabled data-i18n>Measure the gap</button>
+              <button type="button" class="btn" id="sample-btn" data-sample="scooters" data-i18n>Try a sample</button>
+              <button type="button" class="btn" id="sample-closed-btn" data-sample="closed" data-i18n>Sample: closed sidewalk</button>
+              <button type="button" class="btn" id="sample-known-btn" data-sample="known" data-i18n>Sample: known camera</button>
             </div>
             <p class="row" id="token-row" hidden>
-              <label class="hint" for="demo-token">Judge token (live checks on this demo only)</label>
+              <label class="hint" for="demo-token" data-i18n>Judge token (live checks on this demo only)</label>
               <input type="password" id="demo-token" autocomplete="off" spellcheck="false">
             </p>
             <p class="status" id="check-status" role="status" aria-live="polite"></p>
-            <ol class="stages" id="stages" hidden aria-label="Live check progress">
-              <li data-stage="blur"><b>Blur faces</b> on this server, before anything leaves it <span class="st"></span></li>
-              <li data-stage="triage"><b>Muse Spark</b> checks the clip and names the barriers <span class="st"></span></li>
-              <li data-stage="sam"><b>SAM 3.1</b> outlines each barrier through the clip <span class="st"></span></li>
-              <li data-stage="measure"><b>Geometry</b> measures the gap and its error range <span class="st"></span></li>
-              <li data-stage="explain"><b>Muse Spark</b> explains it; numbers checked against the measurement <span class="st"></span></li>
+            <ol class="stages" id="stages" hidden aria-label="Live check progress" data-i18n-attr="aria-label">
+              <li data-stage="blur"><span data-i18n-html><b>Blur faces</b> on this server, before anything leaves it</span> <span class="st"></span></li>
+              <li data-stage="triage"><span data-i18n-html><b>Muse Spark</b> checks the clip and names the barriers</span> <span class="st"></span></li>
+              <li data-stage="sam"><span data-i18n-html><b>SAM 3.1</b> outlines each barrier through the clip</span> <span class="st"></span></li>
+              <li data-stage="measure"><span data-i18n-html><b>Geometry</b> measures the gap and its error range</span> <span class="st"></span></li>
+              <li data-stage="explain"><span data-i18n-html><b>Muse Spark</b> explains it; numbers checked against the measurement</span> <span class="st"></span></li>
             </ol>
           </li>
         </ol>
 
         <figure class="stage" id="stage" hidden>
-          <video id="video" playsinline muted loop preload="metadata" aria-label="Clip with the measured outlines drawn on top. Use Play masks to start or pause."></video>
+          <video id="video" playsinline muted loop preload="metadata" aria-label="Clip with the measured outlines drawn on top. Use Play masks to start or pause." data-i18n-attr="aria-label"></video>
           <canvas id="overlay" aria-hidden="true"></canvas>
           <figcaption class="legend" id="mask-legend"></figcaption>
         </figure>
         <div class="row stage-ctl" id="stage-ctl" hidden>
-          <button type="button" class="btn small" id="play-btn" aria-pressed="false">Play masks</button>
-          <label class="check"><input type="checkbox" id="mask-toggle" checked> Show masks</label>
+          <button type="button" class="btn small" id="play-btn" aria-pressed="false" data-i18n>Play masks</button>
+          <label class="check"><input type="checkbox" id="mask-toggle" checked> <span data-i18n>Show masks</span></label>
         </div>
 
         <article class="verdict" id="verdict" hidden tabindex="-1" aria-live="polite" aria-labelledby="verdict-word">
@@ -213,46 +228,47 @@
           </figure>
           <dl class="nums" id="v-nums">
             <div><dt id="v-gap-label">Measured gap</dt><dd id="v-gap">—</dd></div>
-            <div><dt>Likely range</dt><dd id="v-band">—</dd></div>
+            <div><dt data-i18n>Likely range</dt><dd id="v-band">—</dd></div>
           </dl>
           <p class="assume" id="v-assume" hidden><span class="assume-tag" id="v-assume-tag"></span> <span id="v-assume-text"></span></p>
           <ul class="notes" id="v-notes" hidden></ul>
           <section class="saw" id="v-saw" hidden aria-labelledby="v-saw-h">
-            <h4 id="v-saw-h">What the Meta models saw</h4>
+            <h4 id="v-saw-h" data-i18n>What the Meta models saw</h4>
             <p class="saw-path" id="v-path"></p>
             <ul id="v-saw-list"></ul>
           </section>
           <details class="how">
-            <summary>How we measured</summary>
-            <p class="why" id="v-why"></p>
-            <p class="model" id="v-model"></p>
+            <summary data-i18n>How we measured</summary>
+            <p class="why-lang" id="v-why-lang" hidden data-i18n>The technical notes below are in English.</p>
+            <p class="why" id="v-why" lang="en"></p>
+            <p class="model" id="v-model" lang="en"></p>
           </details>
           <div class="row">
             <button type="button" class="btn primary" id="confirm-btn">Confirm this pin</button>
-            <button type="button" class="btn" id="again-btn">Check another</button>
+            <button type="button" class="btn" id="again-btn" data-i18n>Check another</button>
           </div>
         </article>
 
-        <button type="button" class="btn ghost" id="back-btn">Back to the map overview</button>
+        <button type="button" class="btn ghost" id="back-btn" data-i18n>Back to the map overview</button>
       </div>
     </div>
   </section>
 
   <section class="tour-card" id="tour-card" hidden tabindex="-1" role="region" aria-labelledby="tour-title">
     <div class="tour-top">
-      <h2 id="tour-title">1-minute tour</h2>
+      <h2 id="tour-title" data-i18n>1-minute tour</h2>
       <span class="tour-progress" id="tour-progress">1 / 7</span>
     </div>
     <p class="tour-text" id="tour-text" aria-live="polite"></p>
     <div class="tour-controls">
       <button type="button" class="btn small" id="tour-pause" aria-pressed="false">⏸ Pause</button>
-      <button type="button" class="btn small" id="tour-next">Next →</button>
-      <button type="button" class="btn small ghost" id="tour-close">✕ Close</button>
+      <button type="button" class="btn small" id="tour-next" data-i18n>Next →</button>
+      <button type="button" class="btn small ghost" id="tour-close" data-i18n>✕ Close</button>
     </div>
     <div class="tour-controls" id="tour-end" hidden>
-      <button type="button" class="btn small primary" id="tour-replay">↺ Replay tour</button>
-      <button type="button" class="btn small" id="tour-try">Try your own clip</button>
-      <button type="button" class="btn small ghost" id="tour-intro">Replay intro</button>
+      <button type="button" class="btn small primary" id="tour-replay" data-i18n>↺ Replay tour</button>
+      <button type="button" class="btn small" id="tour-try" data-i18n>Try your own clip</button>
+      <button type="button" class="btn small ghost" id="tour-intro" data-i18n>Replay intro</button>
     </div>
   </section>
 </main>
@@ -270,7 +286,11 @@
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/5.24.0/maplibre-gl.min.js"
         integrity="sha512-hoXlvOdSmh58mppUyZHZsscHkR/yXl6zLpTMTNwA6IZ61DpeaCNjosRu1WJ2DeIpkfW5MsJJ9H89zjV4IBGqRw=="
         crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js"
+        integrity="sha512-YPKqmSND1Yli/sZJnJGnkkG+vt/ZPbxt7iLLHlf/47hyiFZXtH8kP6T9gwUNGSSleb+dwgc6FNb0tQUEyxo7rg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script defer src="/static/i18n.js"></script>
 <script defer src="/static/app.js"></script>
 </body>
 </html>

@@ -1,16 +1,21 @@
 /* Barrier Lens front end: map of Gwanghwamun & Gyeongbokgung + "Check a spot" flow. No build step. */
-(() => {
+(async () => {
   'use strict';
 
+  // _() translates text this page wrote, tr() text the server or a model wrote (static/i18n.js).
+  const { t: _, tr, num: nf, lang } = window.I18N;
+  await window.I18N.ready;
+  window.I18N.apply();
   const $ = (sel) => document.querySelector(sel);
   const CENTRE = [37.5759283, 126.9768176];  // Gwanghwamun Gate; the map opens here
   const params = new URLSearchParams(location.search);
-  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const VERDICT_WORD = { passes: 'Passes', tight: 'Tight', blocked: 'Blocked', unknown: 'Unknown' };
+  const VERDICT_WORD = { passes: _('Passes'), tight: _('Tight'), blocked: _('Blocked'), unknown: _('Unknown') };
+  const PATH_STATE = { open: _('open'), narrowed: _('narrowed'), closed: _('closed') };
   const MASK_COLORS = ['#ffd23f', '#4cc9f0', '#ff6bd6', '#7ee081', '#ff8c42'];
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const monthLabel = (d) => (d ? `${MONTHS[Number(d.slice(5, 7)) - 1]} ${d.slice(0, 4)}` : '');
+  const monthLabel = (d) => (d ? new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, 1))
+    .toLocaleDateString(lang, { year: 'numeric', month: 'short', timeZone: 'UTC' }) : '');
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch { return null; } },
     set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode: ignore */ } },
@@ -36,7 +41,7 @@
     document.documentElement.dataset.theme = t;
     const dark = t === 'dark';
     themeBtn.setAttribute('aria-pressed', String(dark));
-    themeBtn.setAttribute('aria-label', dark ? 'Dark theme on. Switch to light theme' : 'Light theme on. Switch to dark theme');
+    themeBtn.setAttribute('aria-label', dark ? _('Dark theme on. Switch to light theme') : _('Light theme on. Switch to dark theme'));
   }
   applyTheme(store.get('bl-theme') === 'light' ? 'light' : 'dark');
   themeBtn.addEventListener('click', () => {
@@ -46,15 +51,35 @@
   });
 
   // ------------------------------------------------------------------ map
-  const map = L.map('map', { zoomControl: false, attributionControl: true }).setView(CENTRE, 16);
-  L.control.zoom({ position: 'topright' }).addTo(map);
-  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-  }).addTo(map);
+  const map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 19 }).setView(CENTRE, 16);
+  L.control.zoom({ position: 'topright', zoomInTitle: _('Zoom in'), zoomOutTitle: _('Zoom out') }).addTo(map);
+  // Base map: OpenFreeMap vector tiles (OpenStreetMap data) drawn by MapLibre, with place names in the page's
+  // language: name:<lang>, then English or the Latin spelling, then the local (Korean) name. The intro's globe
+  // uses the same style, so it still lands on exactly this view. Without MapLibre or WebGL: OSM raster tiles.
+  const NAME_KEYS = { en: ['name:en', 'name:latin'], ko: ['name:ko'], ja: ['name:ja', 'name:latin'],
+    'zh-CN': ['name:zh-Hans', 'name:zh', 'name:latin'], 'zh-TW': ['name:zh-Hant', 'name:zh', 'name:latin'] };
+  const nameField = ['coalesce', ...(NAME_KEYS[lang] || [`name:${lang}`, 'name:en', 'name:latin']).map((k) => ['get', k]), ['get', 'name']];
+  const baseStyle = fetch('https://tiles.openfreemap.org/styles/liberty')
+    .then((r) => { if (!r.ok) throw new Error(`style HTTP ${r.status}`); return r.json(); })
+    .then((st) => {
+      st.layers.forEach((l) => {
+        const f = l.layout && l.layout['text-field'];
+        if (f && JSON.stringify(f).includes('"name')) l.layout['text-field'] = nameField;
+      });
+      return st;
+    });
+  baseStyle.then((style) => {
+    if (!L.maplibreGL) throw new Error('no MapLibre');
+    L.maplibreGL({ style }).addTo(map);
+  }).catch(() => {
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
+  });
   // keep: replaces Leaflet's default flag-emoji prefix with a plain Leaflet link.
   map.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
-  map.attributionControl.addAttribution('Towing, elevators: <a href="https://data.seoul.go.kr/">Seoul Open Data</a> (KOGL Type 1)');
+  map.attributionControl.addAttribution(_('Towing, elevators: {link} (KOGL Type 1)', { link: '<a href="https://data.seoul.go.kr/">Seoul Open Data</a>' }));
 
   const towLayer = L.layerGroup().addTo(map);
   const exitLayer = L.layerGroup().addTo(map);
@@ -84,7 +109,15 @@
     }
     return { left: 0, top, right: window.innerWidth, bottom: sheet.getBoundingClientRect().top };
   }
+  // A longer tour label (Visite, ツアー, Tham quan) can push the name or tagline onto two lines: drop the label.
+  function fitBar() {
+    const bar = $('.bar');
+    bar.classList.remove('tight');
+    const wraps = (el) => el.offsetHeight > parseFloat(getComputedStyle(el).lineHeight) * 1.5;
+    if (wraps($('.bar h1')) || wraps($('.tagline'))) bar.classList.add('tight');
+  }
   function layout() {
+    fitBar();
     document.documentElement.style.setProperty('--bar-h', `${barH()}px`);
     placeAttribution();
     const b = visibleMapBox();
@@ -110,7 +143,7 @@
     sheet.dataset.state = state;
     const open = state !== 'peek';
     handle.setAttribute('aria-expanded', String(open));
-    $('#sheet-handle-label').textContent = open ? 'Collapse panel' : 'Expand panel';
+    $('#sheet-handle-label').textContent = open ? _('Collapse panel') : _('Expand panel');
     requestAnimationFrame(layout);
   }
   handle.addEventListener('click', () => setSheet(sheet.dataset.state === 'peek' ? 'half' : 'peek'));
@@ -118,16 +151,17 @@
   if ('ResizeObserver' in window) new ResizeObserver(() => layout()).observe(sheet);
 
   // ------------------------------------------------------------------ towing history
+  let towingLoaded = false;
   async function loadTowing(r) {
     const stat = $('#towing-stat');
-    stat.textContent = 'Loading towing history…';
+    stat.textContent = _('Loading towing history…');
     let d;
     try {
       const res = await fetch(`/api/towing?lat=${CENTRE[0]}&lon=${CENTRE[1]}&r=${r}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       d = await res.json();
     } catch (e) {
-      stat.textContent = `Could not load towing history (${e.message}).`;
+      stat.textContent = _('Could not load towing history ({error}).', { error: e.message });
       return;
     }
     towLayer.clearLayers();
@@ -140,26 +174,28 @@
     const cov = d.coverage || {};
     if (!pts.length) {
       stat.textContent = cov.records == null
-        ? 'Towing history is not cached yet (run scripts/fetch_seoul.py).'
-        : `No towing reports in the cached data within ${r} m.`;
+        ? _('Towing history is not cached yet (run scripts/fetch_seoul.py).')
+        : _('No towing reports in the cached data within {r} m.', { r });
     } else {
       const first = pts.reduce((a, p) => (p.first < a ? p.first : a), pts[0].first);
       const last = pts.reduce((a, p) => (p.last > a ? p.last : a), pts[0].last);
-      stat.innerHTML = `<strong>${d.records.toLocaleString('en')}</strong> e-scooter towing reports at ${pts.length} addresses within ${r >= 1000 ? `${r / 1000} km` : `${r} m`} of Gwanghwamun Gate · ${monthLabel(first)} – ${monthLabel(last)}`;
+      towingLoaded = true;
+      stat.innerHTML = `${_('{n} e-scooter towing reports at {addresses} addresses within {distance} of Gwanghwamun Gate', {
+        n: `<strong>${nf(d.records)}</strong>`, addresses: nf(pts.length), distance: r >= 1000 ? `${r / 1000} km` : `${r} m` })} · ${esc(monthLabel(first))} – ${esc(monthLabel(last))}`;
     }
 
     const list = $('#hotspots');
     list.innerHTML = '';
     [...pts].sort((a, b) => b.count - a.count).slice(0, 5).forEach((p) => {
       const li = document.createElement('li');
-      li.innerHTML = `<span class="addr" lang="ko">${esc(shortAddr(p.addr))}<span class="meta" lang="en">within ${p.band_m} m of Gwanghwamun Gate · last ${monthLabel(p.last)}</span></span>
-        <span class="n">${p.count}<span class="visually-hidden"> reports</span></span>`;
+      li.innerHTML = `<span class="addr" lang="ko">${esc(shortAddr(p.addr))}<span class="meta" lang="${lang}">${esc(_('within {m} m of Gwanghwamun Gate · last {month}', { m: p.band_m, month: monthLabel(p.last) }))}</span></span>
+        <span class="n">${nf(p.count)}<span class="visually-hidden"> ${esc(_('reports'))}</span></span>`;
       list.appendChild(li);
     });
 
     const cav = $('#caveats');
     cav.innerHTML = '';
-    [...(cov.caveats || []), cov.source ? `Source: ${cov.source}.` : null].filter(Boolean).forEach((t) => {
+    [...(cov.caveats || []).map(tr), cov.source ? _('Source: {source}.', { source: cov.source }) : null].filter(Boolean).forEach((t) => {
       const li = document.createElement('li');
       li.textContent = t;
       cav.appendChild(li);
@@ -180,37 +216,39 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       d = await res.json();
     } catch (e) {
-      line.textContent = `Exit elevator status unavailable (${e.message}).`;
+      line.textContent = _('Exit elevator status unavailable ({error}).', { error: e.message });
       return;
     }
     exitLayer.clearLayers();
+    const LIFT = { working: _('working'), 'out of service': _('out of service'), 'none listed': _('none listed') };
     (d.exits || []).forEach((x) => {
       const cls = x.elevator === 'working' ? 'ev-working' : x.elevator === 'out of service' ? 'ev-out' : '';
       const icon = L.divIcon({ className: '', html: `<div class="exit-pin ${cls}">${esc(x.ref)}</div>`, iconSize: [30, 30], iconAnchor: [15, 15] });
       const rows = (x.elevator_rows || []).map((r) => `<li lang="ko">${esc(r.name.replace(/^승강기\)/, ''))}: <strong>${esc(r.status)}</strong></li>`).join('');
+      const lift = LIFT[x.elevator] || x.elevator;
       const body = x.elevator === 'none listed'
-        ? '<p>No elevator is listed for this exit in the Seoul Metro feed.</p>'
-        : `<p>Elevator <strong>${esc(x.elevator)}</strong></p><ul>${rows}</ul>`;
-      const label = `${x.station_name} exit ${x.ref}`;
-      L.marker([x.lat, x.lon], { icon, title: `${label}: elevator ${x.elevator}`, keyboard: true, zIndexOffset: cls ? 500 : 0 })
-        .bindPopup(`<h4>${esc(label)}</h4>${body}<p class="ko">Status ${esc(d.status_source)} · ${esc(fmtTime(d.status_as_of))}</p>`)
+        ? `<p>${esc(_('No elevator is listed for this exit in the Seoul Metro feed.'))}</p>`
+        : `<p>${_('Elevator {state}', { state: `<strong>${esc(lift)}</strong>` })}</p><ul>${rows}</ul>`;
+      const label = _('{station} exit {ref}', { station: tr(x.station_name), ref: x.ref });
+      L.marker([x.lat, x.lon], { icon, title: _('{exit}: elevator {state}', { exit: label, state: lift }), keyboard: true, zIndexOffset: cls ? 500 : 0 })
+        .bindPopup(`<h4>${esc(label)}</h4>${body}<p class="ko">${esc(_('Status {source} · {time}', { source: d.status_source, time: fmtTime(d.status_as_of) }))}</p>`)
         .addTo(exitLayer);
     });
     const parts = (d.stations || []).map((s) => {
       const withLift = (s.exits || []).filter((x) => x.elevator === 'working' || x.elevator === 'out of service');
-      const bit = !withLift.length ? 'no exit elevator listed'
+      const bit = !withLift.length ? esc(_('no exit elevator listed'))
         : withLift.map((x) => (x.elevator === 'working'
-          ? `exit ${x.ref} elevator working`
-          : `<strong>exit ${x.ref} out of service</strong>`)).join(', ');
-      return `${esc(s.name)} (${esc(s.line)}): ${bit}`;
+          ? esc(_('exit {ref} elevator working', { ref: x.ref }))
+          : `<strong>${esc(_('exit {ref} out of service', { ref: x.ref }))}</strong>`)).join(', ');
+      return `${esc(tr(s.name))} (${esc(tr(s.line))}): ${bit}`;
     });
     line.innerHTML = `${parts.join(' · ')} <span class="asof">(${esc(d.status_source)}, ${esc(fmtTime(d.status_as_of))})</span>`;
   }
   function fmtTime(iso) {
-    if (!iso) return 'time unknown';
+    if (!iso) return _('time unknown');
     const t = new Date(iso.replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
     if (Number.isNaN(t.getTime())) return iso;
-    return t.toLocaleString('en-GB', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Seoul' }) + ' KST';
+    return t.toLocaleString(lang === 'en' ? 'en-GB' : lang, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Seoul' }) + ' KST';
   }
 
   // ------------------------------------------------------------------ check a spot
@@ -253,7 +291,7 @@
     stage.hidden = false;
     stage.classList.remove('no-video');
     $('#analyze-btn').disabled = false;
-    setStatus(`Clip ready: ${f.name} (${(f.size / 1e6).toFixed(1)} MB). Place the pin, then measure.`);
+    setStatus(_('Clip ready: {name} ({size} MB). Place the pin, then measure.', { name: f.name, size: nf(f.size / 1e6, { maximumFractionDigits: 1 }) }));
   });
   video.addEventListener('loadedmetadata', () => {
     canvas.width = video.videoWidth;
@@ -269,11 +307,12 @@
     fd.append('video', f);
     fd.append('lat', at.lat.toFixed(6));
     fd.append('lon', at.lng.toFixed(6));
+    fd.append('lang', lang);  // Muse Spark writes its explanation in the page's language
     if (profile) fd.append('profile', JSON.stringify(profile));
     const s = tilt.read(f);
     if (s) fd.append('sensor', JSON.stringify(s));
     $('#analyze-btn').disabled = true;
-    setStatus('Measuring… this takes about a minute. Each step below shows when it finishes.');
+    setStatus(_('Measuring… this takes about a minute. Each step below shows when it finishes.'));
     const result = await streamCheck(fd);
     $('#analyze-btn').disabled = false;
     if (result) {
@@ -286,11 +325,13 @@
 
   // Live check as a stream of stage events (POST /api/analyze/stream), shown in the #stages list as they happen.
   const STAGE_INFO = {
-    blur: (e) => (e.faces == null ? '' : `${e.faces} face detection${e.faces === 1 ? '' : 's'} blurred in ${e.frames} frames`),
-    triage: (e) => [e.usable === false ? 'clip not usable' : '', e.path ? `path ${e.path}` : '', (e.barriers || []).join(', ')].filter(Boolean).join(' · '),
-    sam: (e) => Object.entries(e.outlined || {}).map(([c, n]) => `${c} ${n} frames`).join(', '),
-    measure: (e) => [e.verdict, e.mode].filter(Boolean).join(' · '),
-    explain: (e) => (e.model === 'template' ? 'fixed sentence (model text failed a check)' : ''),
+    blur: (e) => (e.faces == null ? '' : e.faces === 1 ? _('1 face detection blurred in {frames} frames', { frames: e.frames })
+      : _('{n} face detections blurred in {frames} frames', { n: e.faces, frames: e.frames })),
+    triage: (e) => [e.usable === false ? _('clip not usable') : '', e.path ? _('path {state}', { state: PATH_STATE[e.path] || e.path }) : '',
+      (e.barriers || []).map(tr).join(', ')].filter(Boolean).join(' · '),
+    sam: (e) => Object.entries(e.outlined || {}).map(([c, n]) => _('{concept} {n} frames', { concept: tr(c), n })).join(', '),
+    measure: (e) => [VERDICT_WORD[e.verdict] || e.verdict, tr(e.mode)].filter(Boolean).join(' · '),
+    explain: (e) => (e.model === 'template' ? _('fixed sentence (model text failed a check)') : ''),
   };
   function stageReset() {
     const ol = $('#stages');
@@ -312,13 +353,13 @@
     try {
       res = await fetch('/api/analyze/stream', { method: 'POST', body: fd, headers: liveHeaders() });
     } catch (e) {
-      setStatus(`Could not reach the server (${e.message}).`, true);
+      setStatus(_('Could not reach the server ({error}).', { error: e.message }), true);
       return null;
     }
     if (!res.ok || !res.body) {
       let detail = '';
       try { detail = (await res.json()).detail; } catch { /* not JSON */ }
-      setStatus(`Could not measure: ${typeof detail === 'string' && detail ? detail : `HTTP ${res.status}`}`, true);
+      setStatus(_('Could not measure: {reason}', { reason: typeof detail === 'string' && detail ? tr(detail) : `HTTP ${res.status}` }), true);
       return null;
     }
     const reader = res.body.getReader();
@@ -337,10 +378,10 @@
         try { ev = JSON.parse(line); } catch { continue; }
         if (ev.stage) stageEvent(ev);
         else if (ev.result) result = ev.result;
-        else if (ev.error) { setStatus(`Could not measure: ${ev.error}`, true); return null; }
+        else if (ev.error) { setStatus(_('Could not measure: {reason}', { reason: tr(ev.error) }), true); return null; }
       }
     }
-    if (!result) setStatus('The check ended without a result. Please try again.', true);
+    if (!result) setStatus(_('The check ended without a result. Please try again.'), true);
     return result;
   }
 
@@ -350,13 +391,13 @@
     try {
       res = await fetch(url, opts);
     } catch (e) {
-      setStatus(`Could not reach the server (${e.message}).`, true);
+      setStatus(_('Could not reach the server ({error}).', { error: e.message }), true);
       return null;
     }
     if (res.ok) return res.json();
     let detail = '';
     try { detail = (await res.json()).detail; } catch { /* not JSON */ }
-    setStatus(`Could not measure: ${typeof detail === 'string' && detail ? detail : `HTTP ${res.status}`}`, true);
+    setStatus(_('Could not measure: {reason}', { reason: typeof detail === 'string' && detail ? tr(detail) : `HTTP ${res.status}` }), true);
     return null;
   }
 
@@ -376,16 +417,18 @@
   // Sample and recorded clips were filmed elsewhere; the pin sits at the crosshair, not where they were filmed.
   function clipOrigin(r) {
     if (!r.sample && !r.recorded) return '';
-    return (r.recorded && r.recorded.about) || 'Sample clip filmed elsewhere — the pin position is illustrative';
+    return (r.recorded && tr(r.recorded.about)) || _('Sample clip filmed elsewhere — the pin position is illustrative');
   }
   function statusLine(r) {
     const b = r.blur || {};
-    const faces = b.faces == null ? '' : ` Face detections blurred before upload: ${b.faces} in ${b.frames_with_faces} of ${b.frames} frames.`;
+    const faces = b.faces == null ? '' : ` ${_('Face detections blurred before upload: {faces} in {with} of {frames} frames.', { faces: b.faces, with: b.frames_with_faces, frames: b.frames })}`;
+    const usd = `$${Number((r.cost && r.cost.usd_estimate) || 0).toFixed(2)}`;
     const cost = !r.cost ? '' : (r.recorded && r.cost.sam_frames === 0)
-      ? ' SAM masks reused from an earlier live call of this clip (not billed again).'
-      : ` ${r.recorded ? 'SAM frames billed when it was recorded' : 'Paid SAM frames this check'}: ${r.cost.sam_frames} ($${Number(r.cost.usd_estimate || 0).toFixed(2)}).`;
-    const head = r.recorded ? `${r.recorded.about ? `${r.recorded.about} ` : ''}Recorded live run (${r.models.triage} and ${r.models.sam} on the Meta Model API, ${r.recorded.at.slice(0, 10)}), replayed with no model calls now.`
-      : r.sample ? 'Sample clip, replayed results (no live model calls).' : 'Done.';
+      ? ` ${_('SAM masks reused from an earlier live call of this clip (not billed again).')}`
+      : ` ${r.recorded ? _('SAM frames billed when it was recorded: {n} ({usd}).', { n: r.cost.sam_frames, usd })
+        : _('Paid SAM frames this check: {n} ({usd}).', { n: r.cost.sam_frames, usd })}`;
+    const head = r.recorded ? `${r.recorded.about ? `${tr(r.recorded.about)} ` : ''}${_('Recorded live run ({triage} and {sam} on the Meta Model API, {date}), replayed with no model calls now.', { triage: r.models.triage, sam: r.models.sam, date: r.recorded.at.slice(0, 10) })}`
+      : r.sample ? _('Sample clip, replayed results (no live model calls).') : _('Done.');
     return `${head}${faces}${cost}`;
   }
 
@@ -394,7 +437,7 @@
     const at = crosshairLatLng();
     if (params.get('verdict')) { await runSample(false, at); return; }  // hand-made UI fixture variants
     sampleBtns.forEach((x) => { x.disabled = true; });
-    setStatus('Loading the sample clip…');
+    setStatus(_('Loading the sample clip…'));
     const sfd = new FormData();
     sfd.append('lat', at.lat.toFixed(6));
     sfd.append('lon', at.lng.toFixed(6));
@@ -410,7 +453,7 @@
     useClip(result.video_url);
     if (!result.video_url) { canvas.width = result.frame_size[0]; canvas.height = result.frame_size[1]; }
     showResult(result, true, at);
-    setStatus(statusLine(result) + (result.precomputed ? ' The clip itself is not on this server, so only the masks are shown.' : ''));
+    setStatus(statusLine(result) + (result.precomputed ? ` ${_('The clip itself is not on this server, so only the masks are shown.')}` : ''));
   }));
   $('#again-btn').addEventListener('click', () => {
     clip.value = '';
@@ -430,8 +473,8 @@
     check.pin.marker.setIcon(pinIcon(check.pin.verdict, true));
     check.pin.marker.dragging?.disable();
     $('#confirm-btn').disabled = true;
-    $('#confirm-btn').textContent = 'Pin confirmed';
-    setStatus('Pin confirmed on this screen. Sharing pins with others is not built yet.');
+    $('#confirm-btn').textContent = _('Pin confirmed');
+    setStatus(_('Pin confirmed on this screen. Sharing pins with others is not built yet.'));
   });
 
   function setStatus(text, warn = false) {
@@ -468,7 +511,7 @@
       canvas.height = s0.height;
     }
     showResult(result, true, at);
-    if (!keepVideo) setStatus('Sample: hand-made masks and numbers, not a measurement.');
+    if (!keepVideo) setStatus(_('Sample: hand-made masks and numbers, not a measurement.'));
   }
 
   function showResult(result, sample, at) {
@@ -477,9 +520,9 @@
     check.maskCache.clear();
     const tracks = toTracks(result);
     const shown = tracks.filter((t) => t.frames.length);
-    $('#mask-legend').innerHTML = (sample ? '<span class="sample-tag">Sample</span>' : '')
-      + (shown.length ? shown.map((t) => `<span><i style="background:${t.color}"></i>${esc(t.concept)}${t.role === 'reference' ? ' (scale reference)' : ''}</span>`).join('')
-        : '<span>No masks found</span>');
+    $('#mask-legend').innerHTML = (sample ? `<span class="sample-tag">${esc(_('Sample'))}</span>` : '')
+      + (shown.length ? shown.map((t) => `<span><i style="background:${t.color}"></i>${esc(tr(t.concept))}${t.role === 'reference' ? ` ${esc(_('(scale reference)'))}` : ''}</span>`).join('')
+        : `<span>${esc(_('No masks found'))}</span>`);
     $('#stage-ctl').hidden = false;
     renderVerdict(result, sample);
     dropPin(result, at);
@@ -507,7 +550,7 @@
 
   const BAR_MAX_CM = 300;  // ranges beyond this are drawn to the edge and labelled "over 3 m"
   function bandText(b) {
-    if (b[1] > BAR_MAX_CM) return `${Math.round(b[0])} cm – over ${BAR_MAX_CM / 100} m`;
+    if (b[1] > BAR_MAX_CM) return _('{lo} cm – over {m} m', { lo: Math.round(b[0]), m: BAR_MAX_CM / 100 });
     return `${Math.round(b[0])}–${Math.round(b[1])} cm`;   // short enough for a half-width tile on a phone
   }
   // One bar: the measured range against the chair width and the width needed with clearance.
@@ -527,31 +570,31 @@
       + (r.gap_cm != null ? `<line x1="${x(r.gap_cm)}" x2="${x(r.gap_cm)}" y1="18" y2="46" class="bar-gap"/>` : '')
       + `<line x1="${x(chair)}" x2="${x(chair)}" y1="8" y2="56" class="bar-chair"/>`
       + `<line x1="${x(need)}" x2="${x(need)}" y1="8" y2="56" class="bar-need"/>`;
-    $('#v-bar-cap').innerHTML = `<span class="k band">Measured range ${esc(bandText(band))}</span>`
-      + `<span class="k chair">Your chair ${Math.round(chair)} cm</span><span class="k need">Needed with room ${Math.round(need)} cm</span>`;
+    $('#v-bar-cap').innerHTML = `<span class="k band">${esc(_('Measured range {band}', { band: bandText(band) }))}</span>`
+      + `<span class="k chair">${esc(_('Your chair {n} cm', { n: Math.round(chair) }))}</span><span class="k need">${esc(_('Needed with room {n} cm', { n: Math.round(need) }))}</span>`;
     fig.hidden = false;
   }
   function renderNotes(r) {
     const notes = (r.notes || []).filter(Boolean);
-    const items = notes.map((n) => `<li>${esc(n)}</li>`);
-    if (notes.some((n) => n.includes('CC BY'))) items.push('<li><a href="/static/demo/ATTRIBUTION.txt">SANPO dataset (Google Research), CC BY 4.0 — modified; full credits</a></li>');
+    const items = notes.map((n) => `<li>${esc(tr(n))}</li>`);
+    if (notes.some((n) => n.includes('CC BY'))) items.push(`<li><a href="/static/demo/ATTRIBUTION.txt">${esc(_('SANPO dataset (Google Research), CC BY 4.0 — modified; full credits'))}</a></li>`);
     const ul = $('#v-notes');
     ul.innerHTML = items.join('');
     ul.hidden = !items.length;
   }
   // What Muse Spark saw (path state, evidence) next to what SAM 3.1 outlined; says so when they disagree.
-  const PATH_WORD = { open: 'Path looks open', narrowed: 'Path is narrowed', closed: 'Path is closed' };
+  const PATH_WORD = { open: _('Path looks open'), narrowed: _('Path is narrowed'), closed: _('Path is closed') };
   function renderSaw(r) {
     const tri = r.triage || {};
     const sec = $('#v-saw');
     if (r.handmade || tri.usable == null) { sec.hidden = true; return; }
     const p = tri.path || {};
-    $('#v-path').textContent = p.state ? `${PATH_WORD[p.state] || p.state} — ${p.evidence || ''}` : '';
+    $('#v-path').textContent = p.state ? `${PATH_WORD[p.state] || p.state} — ${tr(p.evidence || '')}` : '';
     const sam = Object.fromEntries(toTracks(r).map((t) => [t.concept, t.frames.length]));
     const rows = (tri.barriers || []).map((b) => {
       const n = sam[b.concept];
-      const outl = n ? `SAM 3.1 outlined it in ${n} frames` : (n === 0 ? 'SAM 3.1 found no outline for it, so it is not measured' : '');
-      return `<li><b>${esc(b.concept)}</b> — ${esc(b.evidence)}${outl ? ` <span class="${n ? 'ok' : 'miss'}">${esc(outl)}</span>` : ''}</li>`;
+      const outl = n ? _('SAM 3.1 outlined it in {n} frames', { n }) : (n === 0 ? _('SAM 3.1 found no outline for it, so it is not measured') : '');
+      return `<li><b>${esc(tr(b.concept))}</b> — ${esc(tr(b.evidence))}${outl ? ` <span class="${n ? 'ok' : 'miss'}">${esc(outl)}</span>` : ''}</li>`;
     });
     $('#v-saw-list').innerHTML = rows.join('');
     sec.hidden = !(rows.length || p.state);
@@ -560,18 +603,18 @@
 
   // An "unknown" that calibration can fix gets a button for it: the tilt sensor, or the one-time calibration.
   const FIX_FOR = {
-    tilt: ['Turn on phone tilt', 'The tilt was not recorded. With the sensor on, the next clip carries it.', 'tilt'],
-    default_pass: ['Calibrate now', 'Nothing confirmed the scale. Tilt or a one-time calibration does.', 'calib'],
-    height: ['Calibrate now', 'Your armrest height sets how high the phone is.', 'calib'],
-    'field of view': ['Calibrate now', 'Your camera\u2019s angle of view is not known yet.', 'calib'],
-    roll: ['How to hold the phone', 'Hold it level, not tipped to one side.', 'calib'],
+    tilt: [_('Turn on phone tilt'), _('The tilt was not recorded. With the sensor on, the next clip carries it.'), 'tilt'],
+    default_pass: [_('Calibrate now'), _('Nothing confirmed the scale. Tilt or a one-time calibration does.'), 'calib'],
+    height: [_('Calibrate now'), _('Your armrest height sets how high the phone is.'), 'calib'],
+    'field of view': [_('Calibrate now'), _('Your camera’s angle of view is not known yet.'), 'calib'],
+    roll: [_('How to hold the phone'), _('Hold it level, not tipped to one side.'), 'calib'],
   };
   function renderFixit(r, verdict) {
     const p = $('#v-fixit');
     const d = r.measurement_detail || {};
     let fix = verdict === 'unknown' && !r.handmade && FIX_FOR[d.capped || d.dominant_error];
     if (fix && fix[2] === 'tilt' && $('#tilt-row').hidden) {  // no tilt sensor on this device
-      fix = ['Calibrate now', 'The tilt was not recorded. A one-time calibration with four A4 sheets on the ground tells us your usual tilt.', 'calib'];
+      fix = [_('Calibrate now'), _('The tilt was not recorded. A one-time calibration with four A4 sheets on the ground tells us your usual tilt.'), 'calib'];
     }
     p.hidden = !fix;
     if (!fix) return;
@@ -600,13 +643,13 @@
     $('#verdict-icon').setAttribute('href', `#v-${verdict}`);
     $('#verdict-text').textContent = VERDICT_WORD[verdict];
     const kicker = $('#verdict-kicker');
-    kicker.textContent = result.handmade ? 'Sample · hand-made, not a measurement'
-      : sample ? 'Sample clip, filmed elsewhere · replayed model results' : 'Measured from your clip';
+    kicker.textContent = result.handmade ? _('Sample · hand-made, not a measurement')
+      : sample ? _('Sample clip, filmed elsewhere · replayed model results') : _('Measured from your clip');
     kicker.classList.toggle('sample', sample);
     // unknown: the middle of a too-wide range is not an answer, so it is shown as a best guess, not a headline
     $('#v-nums').classList.toggle('weak', verdict === 'unknown');
     $('#v-nums').hidden = result.gap_cm == null && !Array.isArray(result.band_cm);  // e.g. blocked because the path is closed
-    $('#v-gap-label').textContent = verdict === 'unknown' ? 'Best guess (not an answer)' : 'Measured gap';
+    $('#v-gap-label').textContent = verdict === 'unknown' ? _('Best guess (not an answer)') : _('Measured gap');
     $('#v-gap').textContent = result.gap_cm == null ? '—' : `${Math.round(result.gap_cm)} cm`;
     $('#v-band').textContent = Array.isArray(result.band_cm) ? bandText(result.band_cm) : '—';
     renderAssumptions(result);
@@ -615,7 +658,8 @@
     renderNotes(result);
     renderSaw(result);
     $('#v-why').textContent = (result.why || '').replace(/\(default \((.*?)\)\)/g, '($1)');
-    $('#v-explain').textContent = typeof result.explanation === 'string' ? result.explanation : (result.explanation?.text || '');
+    $('#v-why-lang').hidden = lang === 'en';  // the technical trace stays in English
+    $('#v-explain').textContent = tr(typeof result.explanation === 'string' ? result.explanation : (result.explanation?.text || ''));
     const md = result.models || {};
     const srcs = [...new Set(toTracks(result).map((t) => t.source).filter(Boolean))].join(', ');
     const triTxt = tri && tri.usable == null ? 'triage skipped' : `triage ${md.triage || 'unknown'}`;
@@ -623,7 +667,7 @@
       ? 'Masks and text are a hand-made fixture for testing the screen.'
       : `Masks ${md.sam || 'SAM'}${srcs ? ` (${srcs})` : ''} · ${triTxt} · text ${md.explain || 'none'} · width from geometry, not from a model.`;
     $('#confirm-btn').disabled = false;
-    $('#confirm-btn').textContent = 'Confirm this pin';
+    $('#confirm-btn').textContent = _('Confirm this pin');
     card.hidden = false;
   }
 
@@ -640,8 +684,8 @@
     const verdict = VERDICT_WORD[m.verdict] ? m.verdict : 'unknown';
     const origin = clipOrigin(m);
     if (check.pin && !check.pin.confirmed) pinLayer.removeLayer(check.pin.marker);
-    const marker = L.marker(at, { icon: pinIcon(verdict, false), draggable: true, keyboard: true, title: `Checked spot: ${VERDICT_WORD[verdict]}`, zIndexOffset: 1000 })
-      .bindPopup(() => `<h4>${VERDICT_WORD[verdict]}${check.sample ? ' (sample)' : ''}</h4>${origin ? `<p>${esc(origin)}</p>` : ''}<p>${m.gap_cm == null ? 'No width measured' : `Gap ${Math.round(m.gap_cm)} cm`}${Array.isArray(m.band_cm) ? ` (${Math.round(m.band_cm[0])}–${Math.round(m.band_cm[1])} cm)` : ''}</p><p class="ko">${check.pin && check.pin.confirmed ? 'Confirmed' : 'Not confirmed yet. Drag to adjust.'}</p>`)
+    const marker = L.marker(at, { icon: pinIcon(verdict, false), draggable: true, keyboard: true, title: _('Checked spot: {verdict}', { verdict: VERDICT_WORD[verdict] }), zIndexOffset: 1000 })
+      .bindPopup(() => `<h4>${esc(VERDICT_WORD[verdict])}${check.sample ? ` ${esc(_('(sample)'))}` : ''}</h4>${origin ? `<p>${esc(origin)}</p>` : ''}<p>${esc(m.gap_cm == null ? _('No width measured') : _('Gap {n} cm', { n: Math.round(m.gap_cm) }))}${Array.isArray(m.band_cm) ? ` (${Math.round(m.band_cm[0])}–${Math.round(m.band_cm[1])} cm)` : ''}</p><p class="ko">${esc(check.pin && check.pin.confirmed ? _('Confirmed') : _('Not confirmed yet. Drag to adjust.'))}</p>`)
       .addTo(pinLayer);
     check.pin = { marker, verdict, confirmed: false };
   }
@@ -797,7 +841,7 @@
     cancelAnimationFrame(check.raf);
     check.playing = false;
     playBtn.setAttribute('aria-pressed', 'false');
-    playBtn.textContent = 'Play masks';
+    playBtn.textContent = _('Play masks');
   }
   function togglePlay() {
     if (!stage.classList.contains('no-video')) {
@@ -807,7 +851,7 @@
     if (check.playing) { stopLoop(); return; }
     check.playing = true;
     playBtn.setAttribute('aria-pressed', 'true');
-    playBtn.textContent = 'Pause masks';
+    playBtn.textContent = _('Pause masks');
     const dur = 10;
     check.t0 = performance.now();
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -837,8 +881,8 @@
     const el = $('#calib-state');
     const mode = profile?.calibration ? 'calibrated' : profile ? 'saved' : 'default';
     el.dataset.mode = mode;
-    el.textContent = mode === 'calibrated' ? `Calibrated · ${Math.round(profile.calibration.height_m * 100)} cm`
-      : mode === 'saved' ? `Profile · ${Math.round(profile.chair_width_cm)} cm chair` : 'Default assumptions';
+    el.textContent = mode === 'calibrated' ? _('Calibrated · {n} cm', { n: Math.round(profile.calibration.height_m * 100) })
+      : mode === 'saved' ? _('Profile · {n} cm chair', { n: Math.round(profile.chair_width_cm) }) : _('Default assumptions');
   }
   function fillForm() {
     const p = profile || {};
@@ -859,9 +903,9 @@
     const num = (sel) => { const v = parseFloat($(sel).value); return Number.isFinite(v) ? v : null; };
     const p = { chair_type: calForm.querySelector('input[name=chair]:checked').value };
     const w = num('#cal-width'); const h = num('#cal-armrest'); const f = num('#cal-focal');
-    if (w == null || w < 40 || w > 100) return { error: 'Width must be 40–100 cm.' };
-    if (h == null || h < 40 || h > 130) return { error: 'Armrest height must be 40–130 cm.' };
-    if (f != null && (f < 10 || f > 80)) return { error: 'Focal length must be 10–80 mm, or left empty.' };
+    if (w == null || w < 40 || w > 100) return { error: _('Width must be 40–100 cm.') };
+    if (h == null || h < 40 || h > 130) return { error: _('Armrest height must be 40–130 cm.') };
+    if (f != null && (f < 10 || f > 80)) return { error: _('Focal length must be 10–80 mm, or left empty.') };
     Object.assign(p, { chair_width_cm: w, armrest_height_cm: h });
     if (f != null) p.focal_35mm = f;
     if ($('#cal-phone').value.trim()) p.phone_model = $('#cal-phone').value.trim().slice(0, 60);
@@ -875,7 +919,7 @@
     profile = p;
     saveProfile(profile);
     calStatus.classList.remove('warn');
-    calStatus.textContent = `Saved on this phone: ${Math.round(p.chair_width_cm)} cm chair, phone at about ${Math.round(p.armrest_height_cm)} cm. Sent with every check.`;
+    calStatus.textContent = _('Saved on this phone: {w} cm chair, phone at about {h} cm. Sent with every check.', { w: Math.round(p.chair_width_cm), h: Math.round(p.armrest_height_cm) });
     calibState();
   });
   $('#cal-reset').addEventListener('click', () => {
@@ -883,7 +927,7 @@
     try { localStorage.removeItem(PROFILE_KEY); } catch { /* ignore */ }
     fillForm();
     calStatus.classList.remove('warn');
-    calStatus.textContent = 'Profile cleared. Checks use default assumptions again.';
+    calStatus.textContent = _('Profile cleared. Checks use default assumptions again.');
   });
   $('#cal-clip').addEventListener('click', () => tilt.mark());
   $('#cal-clip').addEventListener('change', () => { $('#cal-run').disabled = !($('#cal-clip').files || [])[0]; });
@@ -900,26 +944,29 @@
     if (s) fd.append('sensor', JSON.stringify(s));
     $('#cal-run').disabled = true;
     calStatus.classList.remove('warn');
-    calStatus.textContent = 'Blurring faces, finding the reference, solving height and tilt…';
+    calStatus.textContent = _('Blurring faces, finding the reference, solving height and tilt…');
     let j = null;
     try {
       const res = await fetch('/api/calibrate', { method: 'POST', body: fd, headers: liveHeaders() });
       j = await res.json().catch(() => null);
       if (!res.ok) throw new Error((j && typeof j.detail === 'string' && j.detail) || `HTTP ${res.status}`);
     } catch (e) {
-      calStatus.textContent = `Calibration failed: ${e.message}`;
+      calStatus.textContent = _('Calibration failed: {error}', { error: tr(e.message) });
       calStatus.classList.add('warn');
       $('#cal-run').disabled = false;
       return;
     }
     $('#cal-run').disabled = false;
-    if (!j.ok) { calStatus.textContent = j.why; calStatus.classList.add('warn'); return; }
+    if (!j.ok) { calStatus.textContent = tr(j.why); calStatus.classList.add('warn'); return; }
     const c = { ...j.calibration, at: new Date().toISOString().slice(0, 10) };
     profile = { ...p, calibration: c };
     saveProfile(profile);
-    calStatus.textContent = `Calibrated: phone at ${Math.round(c.height_m * 100)} cm, tilted ${Math.round(c.pitch_deg)}° down`
-      + (c.pitch_bias_deg == null ? ' (no tilt sensor reading, so later checks still estimate tilt).' : `; sensor offset ${c.pitch_bias_deg.toFixed(1)}°.`)
-      + ` Solved on ${c.frames_used} frames.`;
+    calStatus.textContent = [
+      _('Calibrated: phone at {h} cm, tilted {p}° down.', { h: Math.round(c.height_m * 100), p: Math.round(c.pitch_deg) }),
+      c.pitch_bias_deg == null ? _('No tilt sensor reading, so later checks still estimate tilt.')
+        : _('Sensor offset {b}°.', { b: nf(c.pitch_bias_deg, { maximumFractionDigits: 1, minimumFractionDigits: 1 }) }),
+      _('Solved on {n} frames.', { n: c.frames_used }),
+    ].join(' ');
     calibState();
   });
 
@@ -936,8 +983,8 @@
         if (this.buf.length > 4000) this.buf.splice(0, 2000);
       });
       $('#tilt-btn').setAttribute('aria-pressed', 'true');
-      $('#tilt-btn').textContent = 'Phone tilt on';
-      $('#tilt-state').textContent = 'Tilt is read while you film and sent with the clip.';
+      $('#tilt-btn').textContent = _('Phone tilt on');
+      $('#tilt-state').textContent = _('Tilt is read while you film and sent with the clip.');
     },
     mark() { this.t0 = Date.now(); },
     read(file) {
@@ -961,11 +1008,11 @@
     try {
       if (typeof DeviceOrientationEvent.requestPermission === 'function') {
         const r = await DeviceOrientationEvent.requestPermission();
-        if (r !== 'granted') { $('#tilt-state').textContent = 'Tilt permission was not given; tilt is estimated from the clip.'; return; }
+        if (r !== 'granted') { $('#tilt-state').textContent = _('Tilt permission was not given; tilt is estimated from the clip.'); return; }
       }
       tilt.listen();
     } catch (e) {
-      $('#tilt-state').textContent = `Tilt sensor unavailable (${e.message}); tilt is estimated from the clip.`;
+      $('#tilt-state').textContent = _('Tilt sensor unavailable ({error}); tilt is estimated from the clip.', { error: e.message });
     }
   });
   clip.addEventListener('click', () => tilt.mark());
@@ -975,8 +1022,8 @@
     const el = $('#v-assume');
     if (!a) { el.hidden = true; return; }
     el.dataset.mode = a.mode;
-    $('#v-assume-tag').textContent = a.label;
-    $('#v-assume-text').textContent = a.main;
+    $('#v-assume-tag').textContent = tr(a.label);
+    $('#v-assume-text').textContent = tr(a.main);
     el.hidden = false;
   }
   fillForm();
@@ -986,12 +1033,13 @@
   // (add &go to play on from there). A MapLibre globe dives from space to Gwanghwamun Gate and lands on
   // exactly the Leaflet view under it; the towing rings and station exits come up on the real map; then one
   // recorded check plays in a viewfinder (blur -> Muse Spark -> SAM 3.1 -> geometry -> Muse Spark) and the
-  // page's own panel slides in. Once per visit; skip with the button, Esc or a tap. #tour plays it first,
-  // #nointro never. Without WebGL or MapLibre the globe is left out and the rest still plays.
+  // page's own panel slides in. Every load unless the header toggle turned it off; skip with the button,
+  // Esc or a tap. #tour plays it first, #nointro never. Without WebGL or MapLibre the globe is left out and
+  // the rest still plays.
+  const INTRO_PREF = 'bl-intro';  // 'off' once the header toggle turns the intro off
   let introDone = Promise.resolve();
   let playIntroNow = () => Promise.resolve();
   {
-    const FLAG = 'bl-intro-seen';
     const overlay = $('#intro');
     const skipBtn = $('#intro-skip');
     const globeHost = $('#intro-globe');
@@ -1017,6 +1065,8 @@
     // zoom over the dive (seconds, zoom): the globe turns to East Asia, South Korea fills, Seoul, then a slow
     // landing. A monotone cubic through these keys keeps the speed continuous; the centre follows the zoom
     // along the van Wijk curve, so pan and zoom never stop and restart.
+    let skipOnce = false;  // a language switch reloads the page; the intro does not replay for it
+    try { skipOnce = sessionStorage.getItem('bl-intro-skip-once') === '1'; sessionStorage.removeItem('bl-intro-skip-once'); } catch { /* private mode */ }
     const ZKEYS = [[0, 0], [1.35, 2.6], [2.2, 5.4], [2.85, 9.8], [T.dive, 15]];  // first and last zoom set at start
     const RAIL = [T.blur, T.spark[0], T.sam[0], T.measure[0], T.verdict, T.explain[1]];
     const GATE = [CENTRE[1], CENTRE[0]];
@@ -1028,10 +1078,8 @@
     const inOut = (u) => (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
     const outCubic = (u) => 1 - Math.pow(1 - u, 3);
     const outBack = (u) => (u <= 0 ? 0 : 1 + 2.7 * Math.pow(u - 1, 3) + 1.7 * Math.pow(u - 1, 2));
-    const num = (n) => Math.round(n).toLocaleString('en');
+    const num = (n) => nf(Math.round(n));
     const cssVar = (n) => (getComputedStyle(document.documentElement).getPropertyValue(n) || '').trim();
-    const seen = () => { try { return sessionStorage.getItem(FLAG) === '1'; } catch { return false; } };
-    const markSeen = () => { try { sessionStorage.setItem(FLAG, '1'); } catch { /* private mode */ } };
     let cancelPlay = null;
 
     if (skipBtn) skipBtn.addEventListener('click', (e) => { e.stopPropagation(); if (cancelPlay) cancelPlay(); });
@@ -1060,7 +1108,23 @@
       };
     }
 
-    function makeGlobe(topo, start) {
+    // The base map's own layers fade in from zoom 4.5 to 7 over the drawn globe, so the dive ends on the same map.
+    const OPACITY = { fill: ['fill-opacity'], line: ['line-opacity'], symbol: ['text-opacity', 'icon-opacity'],
+      'fill-extrusion': ['fill-extrusion-opacity'], circle: ['circle-opacity'], raster: ['raster-opacity'], background: ['background-opacity'] };
+    function fadeIn(l) {
+      if (l.id === 'label_city_capital') {  // "Seoul" is our own marker during the dive; the map's label returns after it
+        const op = ['interpolate', ['linear'], ['zoom'], 10.5, 0, 11.5, 1];
+        return { ...l, paint: { ...l.paint, 'text-opacity': op, 'icon-opacity': op } };
+      }
+      if ((l.minzoom || 0) >= 7) return l;
+      const paint = { ...l.paint };
+      for (const p of OPACITY[l.type] || []) {
+        const v = typeof paint[p] === 'number' ? paint[p] : 1;
+        paint[p] = ['interpolate', ['linear'], ['zoom'], 4.5, 0, 7, v];
+      }
+      return { ...l, minzoom: Math.max(l.minzoom || 0, 4.5), paint };
+    }
+    function makeGlobe(topo, start, base) {
       if (!window.maplibregl || !window.topojson || !topo) return null;
       let land, korea;
       try {
@@ -1078,20 +1142,21 @@
           center: [start.lon, start.lat], zoom: start.zoom,
           style: {
             version: 8,
+            ...(base ? { glyphs: base.glyphs, sprite: base.sprite } : {}),
             projection: { type: 'globe' },
             sky: { 'atmosphere-blend': op([0, 1, 4, 1, 6.5, 0]) },
             sources: {
               land: { type: 'geojson', data: land },
               korea: { type: 'geojson', data: korea || { type: 'FeatureCollection', features: [] } },
               grat: { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates: lines } } },
-              // the same tiles as the Leaflet map, at the same scale (MapLibre zoom 15 = Leaflet zoom 16)
-              osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, maxzoom: 19 },
+              // the same vector tiles as the Leaflet map, at the same scale (MapLibre zoom 15 = Leaflet zoom 16)
+              ...(base ? { openmaptiles: base.sources.openmaptiles } : {}),
             },
             layers: [
               { id: 'ocean', type: 'background', paint: { 'background-color': cssVar('--globe-ocean') } },
               { id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': cssVar('--globe-land') } },
               { id: 'grat', type: 'line', source: 'grat', maxzoom: 5, paint: { 'line-color': cssVar('--globe-grat'), 'line-width': 0.8 } },
-              { id: 'osm', type: 'raster', source: 'osm', minzoom: 4.5, paint: { 'raster-opacity': op([4.5, 0, 7, 1]) } },
+              ...(base ? base.layers.filter((l) => l.source === 'openmaptiles' || l.type === 'background').map(fadeIn) : []),
               { id: 'korea', type: 'fill', source: 'korea', maxzoom: 8, paint: { 'fill-color': cssVar('--accent'), 'fill-opacity': op([1.6, 0, 2.8, 0.9, 5.5, 0.85, 7.5, 0]) } },
               { id: 'korea-edge', type: 'line', source: 'korea', maxzoom: 8, paint: { 'line-color': cssVar('--accent-ink'), 'line-width': 1, 'line-opacity': op([1.6, 0, 2.8, 0.5, 7.5, 0]) } },
             ],
@@ -1116,29 +1181,29 @@
     function buildText(st) {
       const d = st.d, tow = st.tow;
       const H = [
-        [0.2, T.dive + 0.1, 'Barrier Lens', 'Does the chair fit past it?', 'A sidewalk check for wheelchair users, built on Meta models'],
+        [0.2, T.dive + 0.1, 'Barrier Lens', esc(_('Does the chair fit past it?')), esc(_('A sidewalk check for wheelchair users, built on Meta models'))],
         tow
-          ? [T.rings + 0.05, T.cam - 0.05, 'Gwanghwamun · Seoul Open Data', `<b data-count="${tow.n1000}">0</b> e-scooter towing reports`,
-            `within 1 km of the gate: ${num(tow.n500)} within 500 m, ${num(tow.n300)} within 300 m<br>${esc(tow.span)}`]
-          : [T.rings + 0.05, T.cam - 0.05, 'Gwanghwamun Gate, Seoul, South Korea', 'Towing reports and station exits around the gate', ''],
-        [T.cam + 0.1, T.spark[0], 'Step 1 · film ten seconds', 'Can a wheelchair get past this?', 'Faces are blurred on our server before any model sees the clip.'],
-        [T.spark[0] + 0.05, T.verdict, 'Step 2 · Muse Spark 1.3 and SAM 3.1', 'Find the barriers, then measure the gap',
-          'Models find and outline; geometry measures. A model can only make the answer more cautious.'],
-        [T.verdict + 0.05, T.handoff, 'Step 3 · the answer, with its error', `Passes: about ${num(d.gap_cm)} cm`,
-          `95% band ${num(d.band_cm[0])}–${num(d.band_cm[1])} cm · a ${num(d.chair_cm)} cm chair needs ${num(d.needed_cm)} cm`],
+          ? [T.rings + 0.05, T.cam - 0.05, _('Gwanghwamun · Seoul Open Data'), _('{count} e-scooter towing reports', { count: `<b data-count="${tow.n1000}">0</b>` }),
+            `${esc(_('within 1 km of the gate: {n500} within 500 m, {n300} within 300 m', { n500: num(tow.n500), n300: num(tow.n300) }))}<br>${esc(tow.span)}`]
+          : [T.rings + 0.05, T.cam - 0.05, _('Gwanghwamun Gate, Seoul, South Korea'), esc(_('Towing reports and station exits around the gate')), ''],
+        [T.cam + 0.1, T.spark[0], _('Step 1 · film ten seconds'), esc(_('Can a wheelchair get past this?')), esc(_('Faces are blurred on our server before any model sees the clip.'))],
+        [T.spark[0] + 0.05, T.verdict, _('Step 2 · Muse Spark 1.3 and SAM 3.1'), esc(_('Find the barriers, then measure the gap')),
+          esc(_('Models find and outline; geometry measures. A model can only make the answer more cautious.'))],
+        [T.verdict + 0.05, T.handoff, _('Step 3 · the answer, with its error'), esc(_('Passes: about {n} cm', { n: num(d.gap_cm) })),
+          esc(_('95% band {lo}–{hi} cm · a {chair} cm chair needs {need} cm', { lo: num(d.band_cm[0]), hi: num(d.band_cm[1]), chair: num(d.chair_cm), need: num(d.needed_cm) }))],
       ];
       heads.innerHTML = H.map(([, , k, title, sub]) => `<div class="iv-head"><p class="iv-kicker">${esc(k)}</p><h2 class="iv-title">${title}</h2>${sub ? `<p class="iv-sub">${sub}</p>` : ''}</div>`).join('');
       st.heads = H.map(([a, b], i) => ({ a, b, el: heads.children[i], count: heads.children[i].querySelector('[data-count]') }));
-      const tags = [[T.blur + 0.15, `<b>${num(d.blur.faces)}</b> faces blurred · YuNet`, 'blur'],
-        [T.spark[0] + 0.35, `Muse Spark: path <b>${esc(d.path)}</b>`, 'spark'],
-        ...d.barriers.map((b, i) => [T.spark[0] + 0.65 + 0.3 * i, esc(b), 'spark'])];
+      const tags = [[T.blur + 0.15, _('{n} faces blurred · YuNet', { n: `<b>${num(d.blur.faces)}</b>` }), 'blur'],
+        [T.spark[0] + 0.35, _('Muse Spark: path {state}', { state: `<b>${esc(PATH_STATE[d.path] || d.path)}</b>` }), 'spark'],
+        ...d.barriers.map((b, i) => [T.spark[0] + 0.65 + 0.3 * i, esc(tr(b)), 'spark'])];
       $('#iv-tags').innerHTML = tags.map(([, h, k]) => `<li data-k="${k}">${h}</li>`).join('');
       st.tags = tags.map(([at], i) => ({ at, el: $('#iv-tags').children[i] }));
-      $('#iv-hud-cam').textContent = `camera ${d.camera.height_m.toFixed(2)} m · tilt ${Math.round(d.camera.pitch_deg)}° down`;
+      $('#iv-hud-cam').textContent = _('camera {h} m · tilt {p}° down', { h: nf(d.camera.height_m, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), p: Math.round(d.camera.pitch_deg) });
       $('#iv-verdict-cm').textContent = `${num(d.gap_cm)} cm`;
       st.rail = [...$('#iv-rail').children];
       st.crumbs = [...crumbs.querySelectorAll('li')];
-      st.say = d.explanation;
+      st.say = tr(d.explanation);
       // perimeter of each outline, for the tracing stroke
       st.outlines = d.outlines.map((pts) => {
         let len = 0;
@@ -1160,6 +1225,8 @@
       st.rings = st.tow
         ? [[300, '300 m', st.tow.n300], [500, '500 m', st.tow.n500], [1000, '1 km', st.tow.n1000]].map(([m, label, n]) => ({ px: ringPx(m), label, n }))
         : [[500, '500 m', null]].map(([m, label, n]) => ({ px: ringPx(m), label, n }));
+      const sb = skipBtn.getBoundingClientRect();
+      st.skip = { left: sb.left - r.left, bottom: sb.bottom - r.top };
       const wide = isWide();
       const col = wide ? 448 : 0;
       const w = wide ? Math.min(720, st.W - col - 72) : st.W - 32;
@@ -1202,10 +1269,11 @@
       const out = 1 - seg(t, T.handoff, T.handoff + 0.45);
       if (view && st.globe) {
         const p = st.globe.project(SEOUL);
-        dot(ctx, p, 'Seoul', seg(view.zoom, 4, 4.8) * (1 - seg(view.zoom, 9.5, 10.5)), t, st.accent, st.ink);
+        dot(ctx, p, _('Seoul'), seg(view.zoom, 4, 4.8) * (1 - seg(view.zoom, 9.5, 10.5)), t, st.accent, st.ink);
       }
       if (t >= T.rings) {
         const rp = seg(t, T.rings, T.rings + 1.3), big = st.rings[st.rings.length - 1].px;
+        const placed = [];  // ring labels pushed to the same edge stack instead of covering each other
         if (rp < 1) {
           ctx.globalAlpha = 0.6 * (1 - rp);
           ctx.beginPath(); ctx.arc(st.gate.x, st.gate.y, big * 1.15 * outCubic(rp), 0, 2 * Math.PI);
@@ -1219,11 +1287,14 @@
           ctx.beginPath(); ctx.arc(st.gate.x, st.gate.y, rg.px * p, 0, 2 * Math.PI);
           ctx.fillStyle = st.towColour; ctx.globalAlpha = 0.08 * p * out; ctx.fill();
           ctx.globalAlpha = out; ctx.setLineDash([10, 7]); ctx.strokeStyle = st.towColour; ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]);
-          const la = seg(t, s + 0.45, s + 0.8) * out;
+          const la = seg(t, s + 0.45, s + 0.8) * out * (1 - seg(t, T.cam - 0.2, T.cam + 0.3));  // labels leave when the viewfinder comes in
           if (la > 0) {
             const ang = -Math.PI / 3;
             const x = Math.min(st.W - 70, Math.max(70, st.gate.x + rg.px * Math.cos(ang)));
-            const y = Math.min(st.H - 20, Math.max(20, st.gate.y + rg.px * Math.sin(ang)));
+            let y = Math.min(st.H - 20, Math.max(20, st.gate.y + rg.px * Math.sin(ang)));
+            if (x + 70 > st.skip.left && y - 14 < st.skip.bottom) y = st.skip.bottom + 20;  // keep clear of the skip button
+            while (placed.some((q) => Math.abs(q.x - x) < 120 && Math.abs(q.y - y) < 26)) y += 28;
+            placed.push({ x, y });
             ctx.globalAlpha = la;
             pill(ctx, rg.n == null ? rg.label : `${rg.label} · ${num(rg.n * outCubic(seg(t, s + 0.3, s + 1.0)))}`, x, y, '700 13px system-ui, sans-serif');
           }
@@ -1232,7 +1303,7 @@
       }
       const gp = view && st.globe ? st.globe.project(GATE) : st.gate;
       const ga = view ? seg(view.zoom, 10, 11) : out;
-      dot(ctx, gp, t < T.cam + 0.45 ? 'Gwanghwamun Gate' : '', ga, t, st.accent, st.ink);
+      dot(ctx, gp, t < T.cam + 0.45 ? _('Gwanghwamun Gate') : '', ga, t, st.accent, st.ink);
       const dim = 0.55 * seg(t, T.cam - 0.1, T.cam + 0.45) * out;
       if (dim > 0) { ctx.fillStyle = `rgba(6,8,12,${dim})`; ctx.fillRect(0, 0, st.W, st.H); }
     }
@@ -1292,7 +1363,7 @@
         };
         text(`${num(d.gap_cm * outCubic(seg(t, T.measure[0] + 0.2, T.measure[0] + 0.9)))} cm`, m[0] - nx * 30 * u, m[1] - ny * 30 * u, 56 * u, '#fff');
         const ba = seg(t, T.measure[0] + 0.7, T.measure[0] + 0.95);
-        if (ba > 0) { ctx.globalAlpha = ba; text(`95% band ${num(d.band_cm[0])}–${num(d.band_cm[1])} cm`, m[0] + nx * 52 * u, m[1] + ny * 52 * u, 26 * u, '#fff'); ctx.globalAlpha = 1; }
+        if (ba > 0) { ctx.globalAlpha = ba; text(_('95% band {lo}–{hi} cm', { lo: num(d.band_cm[0]), hi: num(d.band_cm[1]) }), m[0] + nx * 52 * u, m[1] + ny * 52 * u, 26 * u, '#fff'); ctx.globalAlpha = 1; }
         const na = seg(t, T.measure[0] + 0.85, T.measure[0] + 1.1);
         if (na > 0) {
           const half = (len * d.needed_cm) / d.gap_cm / 2, ux = (e1[0] - e0[0]) / len, uy = (e1[1] - e0[1]) / len;
@@ -1300,7 +1371,7 @@
           ctx.globalAlpha = na;
           line([c[0] - ux * half, c[1] - uy * half], [c[0] + ux * half, c[1] + uy * half], 11 * u, 'rgba(0,0,0,.55)');
           line([c[0] - ux * half, c[1] - uy * half], [c[0] + ux * half, c[1] + uy * half], 6 * u, '#3ddc84');
-          text(`needs ${num(d.needed_cm)} cm`, c[0] + nx * 40 * u, c[1] + ny * 40 * u, 26 * u, '#3ddc84');
+          text(_('needs {n} cm', { n: num(d.needed_cm) }), c[0] + nx * 40 * u, c[1] + ny * 40 * u, 26 * u, '#3ddc84');
           ctx.globalAlpha = 1;
         }
       }
@@ -1417,7 +1488,6 @@
       overlay.classList.remove('static');
       overlay.hidden = true;
       if (skipBtn && document.activeElement === skipBtn) skipBtn.blur();
-      markSeen();
       st.resolve();
     }
 
@@ -1453,8 +1523,9 @@
         video.preload = 'auto';
         still.src = '/static/demo/intro-corridor-77.jpg';
         const topo = Promise.all([getJson('/static/vendor/land-110m.json'), getJson('/static/vendor/countries-110m.json')]).catch(() => null);
-        Promise.all([getJson('/static/demo/intro-corridor.json'), within(loadTowing().catch(() => null), 2500), within(topo, 2500)])
-          .then(([d, tow, topoJson]) => {
+        Promise.all([getJson('/static/demo/intro-corridor.json'), within(loadTowing().catch(() => null), 2500), within(topo, 2500),
+          within(baseStyle.catch(() => null), 2500)])
+          .then(([d, tow, topoJson, base]) => {
             if (st.done) return;
             st.d = d; st.tow = tow;
             buildText(st);
@@ -1479,7 +1550,7 @@
             }
             st.crumbT = st.crumbT.map((t, i) => Math.max(t, i * 0.3));
             const start = camera(st, 0);
-            st.globe = topoJson ? makeGlobe(topoJson, start) : null;
+            st.globe = topoJson ? makeGlobe(topoJson, start, base) : null;
             const ready = st.globe ? within(new Promise((r) => st.globe.once('load', r)), 2500) : Promise.resolve();
             return ready.then((ok) => {
               if (st.done) return;
@@ -1508,7 +1579,7 @@
     playIntroNow = (opts = {}) => {
       if (!overlay || !skipBtn) return Promise.resolve();
       if (location.hash === '#nointro') return Promise.resolve();
-      if (!opts.force && AT == null && seen()) return Promise.resolve();
+      if (!opts.force && AT == null && (store.get(INTRO_PREF) === 'off' || skipOnce)) return Promise.resolve();
       if (cancelPlay) cancelPlay();  // a replay never overlaps a running intro
       return reduceMq.matches ? playStatic() : playAnimated();
     };
@@ -1530,59 +1601,61 @@
   function tourMapText() {
     const tow = $('#towing-stat').textContent.trim().replace(/\s+/g, ' ');
     const st = $('#station-line').textContent.trim().replace(/\s+/g, ' ');
-    if (/loading|unavailable|could not/i.test(tow)) {
-      return 'Gwanghwamun & Gyeongbokgung. Past e-scooter towing reports within the ring (Seoul open data) and both stations\u2019 elevators, live from Seoul Metro.';
+    if (!towingLoaded) {
+      return _('Gwanghwamun & Gyeongbokgung. Past e-scooter towing reports within the ring (Seoul open data) and both stations’ elevators, live from Seoul Metro.');
     }
-    const short = st.length > 150 ? `${st.slice(0, 150)}\u2026` : st;
-    return `${tow} Both stations\u2019 elevators are live from Seoul Metro: ${short}`;
+    const short = st.length > 150 ? `${st.slice(0, 150)}…` : st;
+    return `${tow} ${_('Both stations’ elevators are live from Seoul Metro: {status}', { status: short })}`;
   }
   function tourCautiousText() {
     const r = check.result;
     const p = r && r.triage && r.triage.path;
     if (p && p.state && p.evidence && r.verdict && VERDICT_WORD[r.verdict]) {
-      return `Muse Spark read \u201c${p.evidence}\u201d \u2014 the path is ${p.state} \u2014 so the answer is ${VERDICT_WORD[r.verdict]} whatever the geometry measured. A model may only make the answer more cautious.`;
+      return _('Muse Spark read “{evidence}” — the path is {state} — so the answer is {verdict} whatever the geometry measured. A model may only make the answer more cautious.',
+        { evidence: tr(p.evidence), state: PATH_STATE[p.state] || p.state, verdict: VERDICT_WORD[r.verdict] });
     }
-    return 'The triage model reads the clip first. A model may only make the answer more cautious, never looser.';
+    return _('The triage model reads the clip first. A model may only make the answer more cautious, never looser.');
   }
   function tourMeasuredText() {
     const r = check.result;
     if (r && r.gap_cm != null && Array.isArray(r.band_cm)) {
       const chair = Math.round((r.assumptions && r.assumptions.chair_width_cm)
         || (r.measurement_detail && r.measurement_detail.wheelchair_cm) || 65);
-      return `With the camera\u2019s height and tilt known, geometry measures the gap from SAM 3.1\u2019s outlines: about ${Math.round(r.gap_cm)} cm, range ${Math.round(r.band_cm[0])}\u2013${Math.round(r.band_cm[1])}, so a ${chair} cm chair fits.`;
+      return _('With the camera’s height and tilt known, geometry measures the gap from SAM 3.1’s outlines: about {gap} cm, range {lo}–{hi}, so a {chair} cm chair fits.',
+        { gap: Math.round(r.gap_cm), lo: Math.round(r.band_cm[0]), hi: Math.round(r.band_cm[1]), chair });
     }
-    return 'With the camera\u2019s height and tilt known, geometry measures the gap from SAM 3.1\u2019s outlines, with an error range instead of a single number.';
+    return _('With the camera’s height and tilt known, geometry measures the gap from SAM 3.1’s outlines, with an error range instead of a single number.');
   }
   const TOUR_STEPS = [
-    { id: 'map', title: 'Gwanghwamun & Gyeongbokgung', dur: 6,
+    { id: 'map', title: _('Gwanghwamun & Gyeongbokgung'), dur: 6,
       targets: [['#towing-stat', '#station-line']],
       text: tourMapText,
       enter: async () => { tourShowOverview(); setSheet('half'); tourCentre(); } },
-    { id: 'check', title: 'Film ten seconds', dur: 5,
+    { id: 'check', title: _('Film ten seconds'), dur: 5,
       targets: [['#clip', '#tilt-row']],
-      text: () => 'You film ten seconds at seated height. Faces are blurred on our server before any model sees the clip; the phone\u2019s tilt goes with it.',
+      text: () => _('You film ten seconds at seated height. Faces are blurred on our server before any model sees the clip; the phone’s tilt goes with it.'),
       enter: async () => { tourShowCheck(); } },
-    { id: 'pipeline', title: 'The pipeline, replayed', dur: 8, sample: 'closed',
+    { id: 'pipeline', title: _('The pipeline, replayed'), dur: 8, sample: 'closed',
       targets: [['#stages']],
-      text: () => 'Five stages: blur \u2192 Muse Spark triage \u2192 SAM 3.1 outlines \u2192 geometry measures \u2192 Muse Spark explains. Below is a replay of the recorded run\u2019s stage times.',
+      text: () => _('Five stages: blur → Muse Spark triage → SAM 3.1 outlines → geometry measures → Muse Spark explains. Below is a replay of the recorded run’s stage times.'),
       enter: (tok) => tourPlaySample(tok, 'closed', true) },
-    { id: 'cautious', title: 'The model can only be more cautious', dur: 9,
+    { id: 'cautious', title: _('The model can only be more cautious'), dur: 9,
       targets: [['#v-saw', '#verdict']],
       text: tourCautiousText },
-    { id: 'unknown', title: 'An honest Unknown', dur: 8, sample: 'scooters',
+    { id: 'unknown', title: _('An honest Unknown'), dur: 8, sample: 'scooters',
       targets: [['#v-fixit'], ['#verdict']],
-      text: () => 'No gap lies straight ahead, so there is nothing honest to measure: Unknown, with how to film again.',
+      text: () => _('No gap lies straight ahead, so there is nothing honest to measure: Unknown, with how to film again.'),
       enter: (tok) => tourPlaySample(tok, 'scooters', false) },
-    { id: 'measured', title: 'Measured, with its error', dur: 12, sample: 'known',
+    { id: 'measured', title: _('Measured, with its error'), dur: 12, sample: 'known',
       targets: [['#stage']], thenTargets: [['#v-bar'], ['#verdict']], thenAt: 0.5,
       text: tourMeasuredText,
       enter: (tok) => tourPlaySample(tok, 'known', false) },
-    { id: 'calib', title: 'Calibrate once', dur: 7,
+    { id: 'calib', title: _('Calibrate once'), dur: 7,
       targets: [['#calib']],
-      text: () => 'Calibrate once: chair width, armrest height, and three seconds of four A4 sheets on the floor. Then your own checks can become decisive.',
+      text: () => _('Calibrate once: chair width, armrest height, and three seconds of four A4 sheets on the floor. Then your own checks can become decisive.'),
       enter: async () => { tourShowCheck(); $('#calib').open = true; } },
   ];
-  const TOUR_END_TEXT = 'That was the product, replayed from recorded live runs (Muse Spark 1.3 and SAM 3.1 on the Meta Model API). Live checks on your own clip need the judge token.';
+  const TOUR_END_TEXT = _('That was the product, replayed from recorded live runs (Muse Spark 1.3 and SAM 3.1 on the Meta Model API). Live checks on your own clip need the judge token.');
 
   // Quiet twins of enterCheck/leaveCheck: same panels, no focus moves (the tour owns focus).
   function tourShowCheck() {
@@ -1650,7 +1723,7 @@
   async function tourReplayStages(tok, result) {
     const ol = $('#stages');
     ol.hidden = false;
-    ol.setAttribute('aria-label', 'Replay of the recorded run\u2019s stage times');
+    ol.setAttribute('aria-label', _('Replay of the recorded run’s stage times'));
     stageReset();
     const order = ['blur', 'triage', 'sam', 'measure', 'explain'];
     const keys = { blur: 'prepare_s', triage: 'triage_s', sam: 'sam_s', measure: 'measure_s', explain: 'explain_s' };
@@ -1705,7 +1778,7 @@
   function tourSetPaused(p) {
     tour.paused = p;
     tourPauseBtn.setAttribute('aria-pressed', String(p));
-    tourPauseBtn.textContent = p ? '▶ Resume' : '⏸ Pause';
+    tourPauseBtn.textContent = p ? _('▶ Resume') : _('⏸ Pause');
   }
   function startTour() {
     if (!tour.active) tour.calibWasOpen = $('#calib').open;
@@ -1727,7 +1800,7 @@
     tour.ended = true;
     tour.seq += 1;  // cancel any pending sample wait or stage replay
     document.querySelectorAll('.tour-hit').forEach((el) => el.classList.remove('tour-hit'));
-    $('#tour-title').textContent = 'That was the product';
+    $('#tour-title').textContent = _('That was the product');
     $('#tour-text').textContent = TOUR_END_TEXT;
     $('#tour-progress').textContent = `${TOUR_STEPS.length} / ${TOUR_STEPS.length}`;
     tourPauseBtn.hidden = true;
@@ -1742,7 +1815,7 @@
     tourRunning = false;
     tourCardEl.hidden = true;
     document.querySelectorAll('.tour-hit').forEach((el) => el.classList.remove('tour-hit'));
-    $('#stages').setAttribute('aria-label', 'Live check progress');
+    $('#stages').setAttribute('aria-label', _('Live check progress'));
     $('#calib').open = tour.calibWasOpen;
     tourShowOverview();
     setSheet('peek');
@@ -1758,7 +1831,7 @@
     tourRunning = false;
     tourCardEl.hidden = true;
     document.querySelectorAll('.tour-hit').forEach((el) => el.classList.remove('tour-hit'));
-    $('#stages').setAttribute('aria-label', 'Live check progress');
+    $('#stages').setAttribute('aria-label', _('Live check progress'));
     tourShowCheck();
     $('#clip').focus();
   }
@@ -1792,6 +1865,33 @@
     tourCloseFull();
     introDone = playIntroNow({ force: true });
   });
+  // Intro on every load, unless turned off: the header button (wide screens) or the switch in the language menu.
+  // Turning it back on plays it now.
+  const introToggle = $('#intro-toggle');
+  const introPref = $('#intro-pref');
+  function showIntroPref(on) {
+    const label = on ? _('Intro plays on every load. Turn it off') : _('Intro off. Turn it on and play it');
+    introToggle.setAttribute('aria-pressed', String(on));
+    introToggle.setAttribute('aria-label', label);
+    introToggle.title = label;
+    introPref.checked = on;
+  }
+  function setIntroPref(on) {
+    store.set(INTRO_PREF, on ? 'on' : 'off');
+    showIntroPref(on);
+    if (!on) return;
+    $('#prefs').hidePopover?.();
+    if (tour.active) tourCloseFull();
+    introDone = playIntroNow({ force: true });
+  }
+  showIntroPref(store.get(INTRO_PREF) !== 'off');
+  introToggle.addEventListener('click', () => setIntroPref(store.get(INTRO_PREF) === 'off'));
+  introPref.addEventListener('change', () => setIntroPref(introPref.checked));
+
+  // Language menu: the page reloads in the chosen language (map names, model replies and all).
+  $('#lang-code').textContent = { 'zh-CN': '简', 'zh-TW': '繁' }[lang] || lang.toUpperCase();
+  $('#lang-list').innerHTML = window.I18N.LANGS.map(([id, name]) => `<label lang="${id}"><input type="radio" name="lang" value="${id}"${id === lang ? ' checked' : ''}> ${esc(name)}</label>`).join('');
+  $('#lang-list').addEventListener('change', (e) => window.I18N.set(e.target.value));
 
   // ------------------------------------------------------------------ start
   layout();

@@ -75,7 +75,7 @@ button, input, select { font: inherit; color: inherit; }
 .brand-posts { stroke: var(--accent-ink); stroke-width: 3.2; stroke-linecap: round; fill: none; }
 .brand-gap { stroke: var(--accent-ink); stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: 2 2.6; fill: none; }
 .bar h1 { margin: 0; font-size: 1.08rem; line-height: 1.15; letter-spacing: -.01em; }
-.tagline { margin: 0; font-size: .82rem; color: var(--muted); }
+.tagline { margin: 0; font-size: .82rem; line-height: 1.3; color: var(--muted); }
 .icon-btn {
   width: 44px; height: 44px; flex: none; display: grid; place-items: center;
   border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); cursor: pointer;
@@ -84,6 +84,37 @@ button, input, select { font: inherit; color: inherit; }
 .icon-btn .i-moon { fill: currentColor; stroke: none; }
 :root[data-theme="light"] .icon-btn .i-moon { display: none; }
 :root:not([data-theme="light"]) .icon-btn .i-sun { display: none; }
+.icon-btn .i-off { display: none; }
+#intro-toggle[aria-pressed="false"] { color: var(--muted); }
+#intro-toggle[aria-pressed="false"] .i-off { display: inline; }
+.icon-btn .i-play { fill: currentColor; stroke: none; }
+
+/* ---------- language menu (header button + popover) ---------- */
+.lang-btn {
+  height: 44px; flex: none; display: inline-flex; align-items: center; gap: 5px; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2); color: var(--text);
+  font: 700 .85rem/1 var(--font); cursor: pointer; white-space: nowrap;
+}
+.lang-btn svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; }
+.prefs {
+  position: fixed; inset: auto; margin: 0; top: calc(var(--bar-h, 60px) + 6px); right: max(12px, env(safe-area-inset-right));
+  width: min(340px, calc(100vw - 24px)); padding: 12px 14px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgb(0 0 0 / .35);
+}
+.prefs fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.prefs legend { font-weight: 700; padding: 0 0 6px; }
+.lang-list { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 6px; }
+.lang-list label {
+  display: flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 8px; border-radius: 10px;
+  cursor: pointer; white-space: nowrap;
+}
+.lang-list label:has(input:checked) { background: var(--surface-2); font-weight: 700; }
+.prefs-intro {
+  display: flex; align-items: center; gap: 8px; min-height: 44px; margin-top: 10px; padding-top: 8px;
+  border-top: 1px solid var(--line); cursor: pointer; word-break: keep-all;
+}
+.why-lang { margin: 0 0 4px; font-size: .82rem; color: var(--muted); }
 
 /* ---------- map ---------- */
 #map {
@@ -336,7 +367,7 @@ input[type="file"]::file-selector-button {
 .fixit .hint { font-size: .86rem; }
 
 /* ---------- 1-minute tour ---------- */
-.tour-btn { white-space: nowrap; }
+.tour-btn { white-space: nowrap; margin-left: auto; }
 .tour-card {
   position: fixed; z-index: 1200;
   top: calc(var(--bar-h, 60px) + 8px); left: 12px; right: 12px;
@@ -360,6 +391,24 @@ input[type="file"]::file-selector-button {
 }
 @media (min-width: 601px) {
   .tour-btn .tour-short { display: none; }
+}
+/* header controls on phones: the intro button moves into the language menu, then the tagline goes, then the
+   tour label (the button keeps its aria-label), then the brand mark */
+@media (max-width: 600px) {
+  #intro-toggle { display: none; }
+}
+@media (max-width: 460px) {
+  .bar { gap: 8px; }
+  .tagline { display: none; }
+}
+@media (max-width: 384px) {
+  .tour-btn .tour-short { display: none; }
+  .tour-btn { min-width: 44px; }
+}
+.bar.tight .tour-btn .tour-short, .bar.tight .tour-btn .tour-full { display: none; }
+.bar.tight .tour-btn { min-width: 44px; }
+@media (max-width: 340px) {
+  .brand-mark { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .tour-card { transition: none; }
@@ -396,9 +445,9 @@ input[type="file"]::file-selector-button {
   border: 1px solid rgb(255 255 255 / .1); will-change: opacity, transform;
 }
 .iv-kicker { margin: 0 0 6px; font: 750 .74rem/1.25 var(--font); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
-.iv-title { margin: 0; font: 800 clamp(1.3rem, 5vw, 2rem)/1.15 var(--font); color: #fff; word-break: keep-all; overflow-wrap: break-word; }
+.iv-title { margin: 0; font: 800 clamp(1.3rem, 5vw, 2rem)/1.15 var(--font); color: #fff; word-break: keep-all; overflow-wrap: break-word; text-wrap: pretty; }
 .iv-title b { color: var(--accent); font-variant-numeric: tabular-nums; }
-.iv-sub { margin: 8px 0 0; font: 500 clamp(.88rem, 2.4vw, 1rem)/1.45 var(--font); color: rgb(255 255 255 / .82); word-break: keep-all; }
+.iv-sub { margin: 8px 0 0; font: 500 clamp(.88rem, 2.4vw, 1rem)/1.45 var(--font); color: rgb(255 255 255 / .82); word-break: keep-all; text-wrap: pretty; }
 @media (min-width: 900px) {
   .iv-heads { left: 32px; right: auto; top: 28px; width: 384px; }
   .iv-sub { font-size: 1.02rem; }
@@ -459,7 +508,14 @@ input[type="file"]::file-selector-button {
   background: rgb(12 14 19 / .74); border: 1px solid rgb(255 255 255 / .12);
 }
 .iv-rail .iv-short { display: none; }
-@media (max-width: 600px) { .iv-rail .iv-long { display: none; } .iv-rail .iv-short { display: inline; } }
+@media (max-width: 600px) {
+  .iv-rail { gap: 4px; }
+  .iv-rail .iv-long { display: none; }
+  .iv-rail .iv-short { display: inline; }
+  /* the tick goes above the word, so Expliquer or Unschärfe keeps the whole width of a phone-sized step */
+  .iv-rail li { flex-direction: column; padding: 4px 3px; font-size: .7rem; overflow-wrap: normal; hyphens: auto; }
+  .iv-rail li[data-state="done"]::before { margin: 0; }
+}
 .iv-rail li[data-state="run"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .iv-rail li[data-state="done"] { color: #fff; border-color: rgb(61 220 132 / .75); }
 .iv-rail li[data-state="done"]::before { content: "\2713"; margin-right: .35em; color: #3ddc84; }

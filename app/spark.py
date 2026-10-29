@@ -492,15 +492,20 @@ def _template(measurement: dict) -> str:
     return f"{lead} {size}."
 
 
+# languages the page offers (static/i18n.js); explain writes in the one the page sends
+LANGS = {"en": "English", "ko": "Korean", "ja": "Japanese", "zh-CN": "Simplified Chinese", "zh-TW": "Traditional Chinese",
+         "es": "Spanish", "fr": "French", "de": "German", "vi": "Vietnamese", "id": "Indonesian"}
+
+
 async def explain(measurement: dict) -> dict:
     """One or two plain sentences on a geometry measurement for a wheelchair user.
 
     measurement: the dict from geometry.measure_gap, optionally with extra fields such as
-      "chair_width_cm", "barrier" or "lang" ("en" default, "ko" for Korean).
+      "chair_width_cm", "barrier" or "lang" (a LANGS key, "en" default).
     Returns {"text", "model"} plus "warnings" and "call". Any number in the text is a number from the
     measurement; if the model breaks that twice, a fixed template is used and model is "template".
     """
-    lang = {"ko": "Korean", "en": "English"}.get(str(measurement.get("lang", "en")), "English")
+    lang = LANGS.get(str(measurement.get("lang", "en")), "English")
     payload = {k: v for k, v in measurement.items() if k != "lang"}
     messages = [{"role": "system", "content": (PROMPTS / "explain_system.txt").read_text()},
                 {"role": "user", "content": f"Write in {lang}.\nMeasurement JSON:\n"

@@ -13,21 +13,25 @@ def test_pinned_vendor_scripts_before_app():
                 "https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"):
         assert url in HTML and HTML.index(url) < HTML.index("/static/app.js")
     assert "maplibre-gl/5.24.0/maplibre-gl.min.css" in HTML
-    assert HTML.count('integrity="sha512-') >= 4  # Leaflet js/css and MapLibre js/css
+    assert HTML.count('integrity="sha512-') >= 5  # Leaflet js/css, MapLibre js/css, maplibre-gl-leaflet
+    assert "@maplibre/maplibre-gl-leaflet@0.1.4/" in HTML
+    assert HTML.index("/static/i18n.js") < HTML.index("/static/app.js")
 
 
 def test_overlay_markup_and_a11y():
     for frag in ('id="intro"', 'id="intro-globe"', 'id="intro-fx"', 'id="iv-cam"', 'id="iv-video"', 'id="iv-still"',
                  'id="iv-rail"', 'id="intro-skip"', 'Skip intro', 'role="status"', "Gwanghwamun Gate",
-                 "SANPO (Google Research, CC BY 4.0)", "OpenStreetMap contributors", 'id="tour-intro"', "Replay intro"):
+                 "SANPO (Google Research, CC BY 4.0)", "OpenStreetMap contributors", 'id="tour-intro"', "Replay intro",
+                 'id="intro-toggle" aria-pressed="true"'):
         assert frag in HTML, f"{frag} missing"
 
 
 def test_intro_behaviour_hooks():
-    for s in ("bl-intro-seen", "sessionStorage", "#nointro", "#tour", "Escape", "prefers-reduced-motion",
+    for s in ("INTRO_PREF = 'bl-intro'", "store.get(INTRO_PREF) === 'off'", "#intro-toggle", "#nointro", "#tour", "Escape", "prefers-reduced-motion",
               "intro_at", "projection: { type: 'globe' }", "tile.openstreetmap.org", "map.getZoom() - 1",
               "zoomPath", "monotone", "redraw()", "intro-on", "/static/demo/intro-corridor.json",
-              "requestAnimationFrame", "devicePixelRatio"):
+              "requestAnimationFrame", "devicePixelRatio", "tiles.openfreemap.org/styles/liberty", "L.maplibreGL",
+              "base.sources.openmaptiles", "fadeIn", "nameField"):
         assert s in JS, f"{s} missing from intro code"
 
 
