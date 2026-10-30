@@ -585,6 +585,16 @@
   "where": "app.js"
  },
  {
+  "en": "live",
+  "kind": "page",
+  "where": "app.js"
+ },
+ {
+  "en": "cached",
+  "kind": "page",
+  "where": "app.js"
+ },
+ {
   "en": "time unknown",
   "kind": "page",
   "where": "app.js"

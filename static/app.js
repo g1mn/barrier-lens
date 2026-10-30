@@ -233,7 +233,7 @@
         : `<p>${_('Elevator {state}', { state: `<strong>${esc(lift)}</strong>` })}</p><ul>${rows}</ul>`;
       const label = _('{station} exit {ref}', { station: tr(x.station_name), ref: x.ref });
       L.marker([x.lat, x.lon], { icon, title: _('{exit}: elevator {state}', { exit: label, state: lift }), keyboard: true, zIndexOffset: cls ? 500 : 0 })
-        .bindPopup(`<h4>${esc(label)}</h4>${body}<p class="ko">${esc(_('Status {source} · {time}', { source: d.status_source, time: fmtTime(d.status_as_of) }))}</p>`)
+        .bindPopup(`<h4>${esc(label)}</h4>${body}<p class="ko">${esc(_('Status {source} · {time}', { source: srcName(d.status_source), time: fmtTime(d.status_as_of) }))}</p>`)
         .addTo(exitLayer);
     });
     const parts = (d.stations || []).map((s) => {
@@ -244,7 +244,11 @@
           : `<strong>${esc(_('exit {ref} out of service', { ref: x.ref }))}</strong>`)).join(', ');
       return `${esc(tr(s.name))} (${esc(tr(s.line))}): ${bit}`;
     });
-    line.innerHTML = `${parts.join(' · ')} <span class="asof">(${esc(d.status_source)}, ${esc(fmtTime(d.status_as_of))})</span>`;
+    line.innerHTML = `${parts.join(' · ')} <span class="asof">(${esc(srcName(d.status_source))}, ${esc(fmtTime(d.status_as_of))})</span>`;
+  }
+  // where the elevator status came from: 'live' (fetched from Seoul Metro now) or 'cache' (the stored copy)
+  function srcName(s) {
+    return s === 'live' ? _('live') : s === 'cache' ? _('cached') : s;
   }
   function fmtTime(iso) {
     if (!iso) return _('time unknown');
