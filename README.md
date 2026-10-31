@@ -4,6 +4,10 @@
 
 Built during the Meta Global AI Developer Hackathon (build window Oct 27 – Nov 4, 2026, deadline 9 PM ET) · Indie Developer track · Theme: Push the Frontier. First commit: Oct 27, 2026 22:21 ET (Oct 28 11:21 KST). Every line of code here was written in the build window; what is not ours is listed under [Built here, and not ours](#built-here-and-not-ours).
 
+[![Barrier Lens: the known-camera sample measured 131 cm (95% range 101–168) and passes. Click to watch the 2:51 demo video.](docs/barrier-lens-hero.jpg)](https://youtu.be/VOkYFrEzF2U)
+
+<sub>The demo video's end card (click to watch). Frame from the SANPO dataset © Google Research, CC BY 4.0, modified (faces blurred, outlines and ruler drawn by the app); map © OpenStreetMap contributors, OpenFreeMap © OpenMapTiles.</sub>
+
 **Muse Spark proposes. SAM 3.1 outlines. Geometry measures. People confirm.**
 
 ## Try it in 60 seconds
