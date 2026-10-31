@@ -29,7 +29,7 @@ On a wide screen the clip, with SAM 3.1's outlines and the measured ruler, sits 
 - **The intro (15 s):** the view dives from a globe to Gwanghwamun Gate (Seoul), tracing South Korea's coast as the globe turns while a card lists what the app does. It then plays one recorded check in a viewfinder (faces blurred → Muse Spark → SAM 3.1 outlines → the measured gap → the verdict). It plays on every load; the ▷ button in the header, or the switch in the language menu, turns it off and back on.
 - **The map:** Gwanghwamun Gate and Gyeongbokgung Palace.
   - E-scooter towing reports from Seoul open data: 384 at 128 lot addresses within 500 m of the gate, Aug 2021 – Dec 2025.
-  - Live elevator status for Gyeongbokgung (Line 3) and Gwanghwamun (Line 5) stations, joined to exit positions from OpenStreetMap.
+  - Live exit-elevator status from Seoul's open-data feed for the two nearest stations, joined to exit positions from OpenStreetMap: Gyeongbokgung (Line 3) exit 4. The feed lists Gwanghwamun's (Line 5) elevator by platform position rather than by exit, so the map does not show it yet.
 - **Ten languages:** English (default), 한국어, 日本語, 简体中文, 繁體中文, Español, Français, Deutsch, Tiếng Việt and Bahasa Indonesia, from the 🌐 menu or a link such as `?lang=ko`.
   - The whole page changes: the map's place names, the intro, the tour, the verdict card, the server's sentences and the recorded runs' Muse Spark replies (shown translated).
   - A live check asks Muse Spark to write its explanation in the chosen language; the number check still applies. Only the technical "How we measured" trace stays in English.
@@ -70,7 +70,7 @@ flowchart TB
 | Step | What it does | Where |
 |---|---|---|
 | Blur | Every frame is face-blurred on our server before anything leaves it (OpenCV YuNet, full frame plus a 2× tiled pass for small faces). | `app/blur.py` |
-| Muse Spark 1.3 | Rejects unusable clips, names each barrier with frame evidence, and says whether the walking path is open, narrowed or closed. Strict JSON schema; any distance it writes is rejected. | `app/spark.py`, `app/prompts/triage_system.txt` |
+| Muse Spark 1.3 | Reads six frames spread across the clip, rejects unusable clips, names each barrier with a one-line evidence note, and says whether the walking path is open, narrowed or closed. Strict JSON schema; any distance it writes is rejected. | `app/spark.py`, `app/prompts/triage_system.txt` |
 | SAM 3.1 | Segments and tracks each named barrier through the clip (up to three), one phrase per request. On every check it also sends one reference phrase: "paper" when Muse Spark saw a reference, otherwise "tactile paving". | `app/sam.py` |
 | Geometry | Turns the masks' ground contacts into a free width with a Monte Carlo error band. The scale comes from a reference of known size (four A4 sheets, a 30 cm tactile block) or from the camera pose (phone height, field of view, tilt). Only the gap straight ahead counts. | `app/geometry.py`, `app/pipeline.py`, `app/calibration.py` |
 | Muse Spark 1.3 | Explains the verdict in one or two plain sentences. Every number must appear in the measurement, and an "unknown" must name the measured cause (for example, the tilt was not recorded). Otherwise a fixed sentence is used. | `app/spark.py`, `app/analyze.py` |
@@ -78,7 +78,7 @@ flowchart TB
 
 ## Two rules keep the models honest
 
-1. **Models may only make a verdict more cautious, never more hopeful.**
+1. **What Muse Spark reads about the path can only make a verdict more cautious, never more hopeful,** and a pass needs a reference in the clip or a one-time calibration.
 2. **The width always comes from geometry.** The models name things, outline them and explain; they never estimate a distance.
 
 ```mermaid
@@ -105,15 +105,16 @@ flowchart TD
   class tight warn
 ```
 
-If Muse Spark sees the sidewalk closed, the verdict is *blocked* whatever the geometry measured (sample: *closed sidewalk*). A *pass* is never reported from default assumptions alone: it needs a reference in the clip or a one-time calibration. The phone's tilt narrows the band but does not replace the calibration. A band that spans both "does not fit" and "fits" is reported as **unknown**, never as "tight" (`app/geometry.py` `verdict_for`, `app/analyze.py` `apply_path_and_mode`).
+If Muse Spark sees the sidewalk closed, the verdict is *blocked* whatever the geometry measured (sample: *closed sidewalk*). A *pass* is never reported from default assumptions alone: it needs a reference in the clip or a one-time calibration. The phone's tilt narrows the band but does not replace the calibration. A band wider than 40 cm that spans both "does not fit" and "fits" is reported as **unknown**, never as "tight"; a narrower band that overlaps the chair width is *tight* (may or may not fit) (`app/geometry.py` `verdict_for`, `app/analyze.py` `apply_path_and_mode`).
 
 ## Why SAM 3.1
 
 No SAM 3.1 mask, no measurement: geometry measures between the masks' ground contacts, so the outline *is* the measurement.
 
-- **Plain words in, masks out.** SAM 3.1 takes the barrier names Muse Spark wrote in plain words ("scooter", "construction barrier") as its prompts and returns a mask for each object, tracked through the whole clip.
+- **Plain words in, masks out.** SAM 3.1 takes the barrier names Muse Spark wrote in plain words ("scooter", "construction barrier") as its prompts and returns a mask for each object, tracked through the whole clip. Tracking picks the frame where the most barriers are outlined together and draws the outlines through the clip (a calibration takes the median over tracked frames); the width itself is measured on that one frame.
+- **A concept reached further than its word.** In the known-camera run SAM found nothing for "construction fence", yet its "construction barrier" outlines took in that orange mesh fence too, and the measured 131 cm runs from the fence to the first water-filled barrier (`static/demo/sanpo-corridor-live.json`: frame 77, objects 4 and 1; `docs/sanpo-check.md`).
 - **No taps, no stitching.** Someone filming from a wheelchair never taps or draws a box, and we stitch no separate barrier detector and tracker together.
-- **Cost.** A check costs $0.03–0.06 of SAM.
+- **Cost.** A check cost $0.03–0.06 of SAM in our runs, at most $0.08 (ten seconds at 10 fps, three barriers plus a reference).
 - **Where it fell short** (`docs/vocab.md`). When it finds nothing, a clip stays *unknown* without a tilt reading or a one-time calibration.
 
 | Phrase sent to SAM 3.1 | Frames found |
@@ -124,7 +125,7 @@ No SAM 3.1 mask, no measurement: geometry measures between the masks' ground con
 | "barricade", "road barrier", "sawhorse" (same clip) | nothing |
 | "tactile paving" (hoped-for 30 cm scale reference) | nothing, under four phrasings |
 
-The triage prompt prefers words that tested well (scooter, sign), and code rewrites "e-scooter" as "scooter". SAM can still return nothing for a phrase Muse Spark chose ("bicycle" and "construction fence" in the recorded runs); such a barrier is then not measured.
+The triage prompt suggests 13 plain nouns (scooter, sign, traffic cone, construction barrier and others); in the recorded runs SAM found scooter, sign, traffic cone and construction barrier but not bicycle or construction fence, and code rewrites "e-scooter" as "scooter". A barrier SAM returns nothing for is not measured on its own (but see the fence above).
 
 ## Calibrate once
 
@@ -185,7 +186,7 @@ Numbers below come from files in this repo. Samples are small and labelled as su
 
 **Public photos with a known length on the ground** (`data/eval/`, `scripts/eval_public.py`, no model calls; three images, a smoke test, not a benchmark). Each cell is the 95% range; ✓ means it contains the true value:
 
-| Photo | What is known | Default (seated) | Camera height and lens known | Plus tilt |
+| Photo | What is known | Default (seated) | Camera height guessed, lens known | Plus tilt |
 |---|---|---|---|---|
 | Graz, Kronesgasse (CC0) | clear width 85 cm, kerb edge to wall base | 20–124 ✓ | 40–234 ✓ | 55–137 ✓ |
 | Teltow (CC BY 3.0) | a 1 m folding ruler lying across the path | **37–57 ✗** | 74–124 ✓ | 75–112 ✓ |
@@ -215,7 +216,7 @@ The known-camera clip is 10 s of the [SANPO](https://github.com/google-research-
 | | |
 |---|---|
 | Time | a 7 s clip takes about a minute end to end; face blur and SAM take most of it, and the page shows each stage's time as it runs |
-| SAM 3.1 | $0.03 for a 7 s clip with two concepts, $0.06 for a 10 s clip with three |
+| SAM 3.1 | $0.03 for a 7 s clip with two concepts, $0.06 for a 10 s clip with three; at most $0.08 (10 s, three barriers plus a reference) |
 | Muse Spark 1.3 | ran on the hackathon's free Meta Model API credits (not priced here) |
 
 ## Tests
@@ -296,6 +297,7 @@ Main routes:
 
 - Licence plates are not detected (no plate detector in OpenCV 5). We check demo frames by eye.
 - The measurement uses one frame; masks that do not reach the ground make a barrier look further away than it is.
+- With the tilt sensor off, the tilt is not estimated from the clip: a wide range of tilts is assumed (lines on the ground are used only in the offline photo evaluation above).
 - The way through is the widest gap straight ahead: a neighbouring pair that straddles the image's centre column and stands side by side, not one behind the other.
   - Gaps elsewhere are listed but never chosen. This assumes you film facing the gap you want to pass.
   - A barrier dead ahead is measured only on the side of the centre line it leaves open.

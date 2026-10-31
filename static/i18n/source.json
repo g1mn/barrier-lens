@@ -250,7 +250,7 @@
   "where": "index.html"
  },
  {
-  "en": "Tilt sensor off: tilt is estimated from the clip.",
+  "en": "Tilt sensor off: a wide range of tilts is assumed.",
   "kind": "page",
   "where": "index.html"
  },
@@ -975,12 +975,12 @@
   "where": "app.js"
  },
  {
-  "en": "Tilt permission was not given; tilt is estimated from the clip.",
+  "en": "Tilt permission was not given; a wide range of tilts is assumed.",
   "kind": "page",
   "where": "app.js"
  },
  {
-  "en": "Tilt sensor unavailable ({error}); tilt is estimated from the clip.",
+  "en": "Tilt sensor unavailable ({error}); a wide range of tilts is assumed.",
   "kind": "page",
   "where": "app.js"
  },

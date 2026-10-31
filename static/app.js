@@ -1016,11 +1016,11 @@
     try {
       if (typeof DeviceOrientationEvent.requestPermission === 'function') {
         const r = await DeviceOrientationEvent.requestPermission();
-        if (r !== 'granted') { $('#tilt-state').textContent = _('Tilt permission was not given; tilt is estimated from the clip.'); return; }
+        if (r !== 'granted') { $('#tilt-state').textContent = _('Tilt permission was not given; a wide range of tilts is assumed.'); return; }
       }
       tilt.listen();
     } catch (e) {
-      $('#tilt-state').textContent = _('Tilt sensor unavailable ({error}); tilt is estimated from the clip.', { error: e.message });
+      $('#tilt-state').textContent = _('Tilt sensor unavailable ({error}); a wide range of tilts is assumed.', { error: e.message });
     }
   });
   clip.addEventListener('click', () => tilt.mark());
