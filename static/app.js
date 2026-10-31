@@ -610,7 +610,7 @@
   // An "unknown" that calibration can fix gets a button for it: the tilt sensor, or the one-time calibration.
   const FIX_FOR = {
     tilt: [_('Turn on phone tilt'), _('The tilt was not recorded. With the sensor on, the next clip carries it.'), 'tilt'],
-    default_pass: [_('Calibrate now'), _('Nothing confirmed the scale. Tilt or a one-time calibration does.'), 'calib'],
+    default_pass: [_('Calibrate now'), _('Nothing confirmed the scale. A one-time calibration or four A4 sheets on the ground do.'), 'calib'],
     height: [_('Calibrate now'), _('Your armrest height sets how high the phone is.'), 'calib'],
     'field of view': [_('Calibrate now'), _('Your camera’s angle of view is not known yet.'), 'calib'],
     roll: [_('How to hold the phone'), _('Hold it level, not tipped to one side.'), 'calib'],

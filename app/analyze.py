@@ -363,10 +363,11 @@ UNKNOWN_CAUSES = {
     "mask edges": ("the edges of the barriers were hard to pin down, so the gap could be anywhere from {lo} to {hi} cm",
                    "Film a little closer and hold the phone steady.",
                    ("edge", "가장자리", "輪郭", "端", "边缘", "邊緣", "borde", "bord", "kante", "rand", "cạnh", "mép", "tepi")),
-    # not an error source: a pass from default assumptions alone is held back (apply_path_and_mode)
-    "default_pass": ("this was measured from default assumptions only (no tilt reading, reference or calibration), and "
+    # not an error source: a pass from default assumptions alone is held back (apply_path_and_mode). The tilt sensor
+    # narrows the band but leaves the mode "default" (calibration.py), so only a reference or a calibration lifts it.
+    "default_pass": ("this was measured from default assumptions only (no reference in the clip or calibration), and "
                      "we only say a chair fits when one of those confirms it",
-                     "Turn on 'Use phone tilt' and film again, or put four A4 sheets flat on the ground near the gap.",
+                     "Calibrate once in your profile, or put four A4 sheets flat on the ground near the gap.",
                      ("default", "assum", "confirm", "tilt", "가정", "기울", "前提", "仮定", "確認", "假设", "假設", "默认",
                       "預設", "确认", "suposic", "predetermin", "hypoth", "défaut", "annahme", "bestätig", "giả định",
                       "mặc định", "xác nhận", "asumsi", "bawaan", "konfirmasi")),

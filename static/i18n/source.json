@@ -800,7 +800,7 @@
   "where": "app.js"
  },
  {
-  "en": "Nothing confirmed the scale. Tilt or a one-time calibration does.",
+  "en": "Nothing confirmed the scale. A one-time calibration or four A4 sheets on the ground do.",
   "kind": "page",
   "where": "app.js"
  },
@@ -1525,12 +1525,12 @@
   "where": "app/analyze.py UNKNOWN_CAUSES"
  },
  {
-  "en": "this was measured from default assumptions only (no tilt reading, reference or calibration), and we only say a chair fits when one of those confirms it",
+  "en": "this was measured from default assumptions only (no reference in the clip or calibration), and we only say a chair fits when one of those confirms it",
   "kind": "server",
   "where": "app/analyze.py UNKNOWN_CAUSES"
  },
  {
-  "en": "Turn on 'Use phone tilt' and film again, or put four A4 sheets flat on the ground near the gap.",
+  "en": "Calibrate once in your profile, or put four A4 sheets flat on the ground near the gap.",
   "kind": "server",
   "where": "app/analyze.py UNKNOWN_CAUSES"
  },

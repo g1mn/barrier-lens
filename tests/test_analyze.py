@@ -400,7 +400,8 @@ def test_models_may_only_make_a_verdict_more_cautious():
     capped = analyze.apply_path_and_mode(passes, {"path": {"state": "open", "evidence": "clear"}}, "default")
     assert capped["verdict"] == "unknown" and capped["detail"]["capped"] == "default_pass"
     cause = analyze.unknown_cause(capped)
-    assert "default assumptions" in cause["reason"] and "tilt" in cause["next_step"].lower()
+    assert "default assumptions" in cause["reason"] and "calibrate" in cause["next_step"].lower()
+    assert "tilt" not in cause["next_step"].lower()  # the tilt sensor leaves the mode "default", so it cannot lift the cap
     # a confirmed scale (tilt sensor, calibration or a reference) keeps the pass; "narrowed" changes nothing
     assert analyze.apply_path_and_mode(passes, {"path": {"state": "narrowed", "evidence": "x"}}, "sensor") is passes
     assert analyze.apply_path_and_mode(passes, None, "reference") is passes
