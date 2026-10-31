@@ -343,24 +343,33 @@ def _unknown(why: str) -> dict:
 
 # Why an "unknown" was unknown, in plain words, from geometry's own numbers (never from the model). The explanation
 # must name this cause; a model sentence that blames something else ("the view was unclear") is replaced.
-# (reason, next step, words the explanation must contain one of)
+# (reason, next step, words the explanation must contain one of; lower case, in all ten page languages, so a
+# Japanese or German explanation that names the cause is kept rather than swapped for our fixed sentence)
 UNKNOWN_CAUSES = {
     "tilt": ("the phone's tilt was not recorded, so the gap could be anywhere from {lo} to {hi} cm",
              "Allow the motion sensor when you film so the tilt is recorded, or calibrate once in your profile.",
-             ("tilt", "angle", "기울")),
+             ("tilt", "angle", "기울", "傾き", "傾斜", "倾斜", "角度", "inclin", "ángulo", "neig", "winkel", "nghiêng", "miring")),
     "height": ("we do not know how high you held the phone, so the gap could be anywhere from {lo} to {hi} cm",
-               "Set your armrest height in your profile, or calibrate once.", ("high", "height", "높이")),
+               "Set your armrest height in your profile, or calibrate once.",
+               ("high", "height", "높이", "高さ", "高度", "altura", "hauteur", "höhe", "chiều cao", "tinggi")),
     "field of view": ("we do not know how wide your phone camera sees, so the gap could be anywhere from {lo} to "
-                      "{hi} cm", "Calibrate once in your profile so we know your camera.", ("camera", "화각", "카메라")),
+                      "{hi} cm", "Calibrate once in your profile so we know your camera.",
+                      ("camera", "화각", "카메라", "カメラ", "画角", "相机", "相機", "视角", "視角", "cámara", "caméra",
+                       "kamera", "máy ảnh")),
     "roll": ("the phone was leaning to one side, so the gap could be anywhere from {lo} to {hi} cm",
-             "Hold the phone level when you film.", ("level", "side", "lean", "수평", "기울")),
+             "Hold the phone level when you film.",
+             ("level", "side", "lean", "수평", "기울", "水平", "傾", "倾", "nivel", "niveau", "pench", "waagerecht", "schief",
+              "thăng bằng", "nghiêng", "miring")),
     "mask edges": ("the edges of the barriers were hard to pin down, so the gap could be anywhere from {lo} to {hi} cm",
-                   "Film a little closer and hold the phone steady.", ("edge", "가장자리")),
+                   "Film a little closer and hold the phone steady.",
+                   ("edge", "가장자리", "輪郭", "端", "边缘", "邊緣", "borde", "bord", "kante", "rand", "cạnh", "mép", "tepi")),
     # not an error source: a pass from default assumptions alone is held back (apply_path_and_mode)
     "default_pass": ("this was measured from default assumptions only (no tilt reading, reference or calibration), and "
                      "we only say a chair fits when one of those confirms it",
                      "Turn on 'Use phone tilt' and film again, or put four A4 sheets flat on the ground near the gap.",
-                     ("default", "assum", "confirm", "tilt", "가정", "기울")),
+                     ("default", "assum", "confirm", "tilt", "가정", "기울", "前提", "仮定", "確認", "假设", "假設", "默认",
+                      "預設", "确认", "suposic", "predetermin", "hypoth", "défaut", "annahme", "bestätig", "giả định",
+                      "mặc định", "xác nhận", "asumsi", "bawaan", "konfirmasi")),
 }
 
 

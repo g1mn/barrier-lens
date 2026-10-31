@@ -532,3 +532,14 @@ def test_chat_malformed_200_is_a_spark_error(monkeypatch):
     b = spark.Backend("meta", "u", "muse-spark-1.3", "k", "max_completion_tokens")
     with pytest.raises(spark.SparkError, match="malformed"):
         asyncio.run(spark._chat(b, [], None, "low"))
+
+
+def test_cause_words_cover_every_page_language():
+    from app.analyze import UNKNOWN_CAUSES
+    for reason, step, words in UNKNOWN_CAUSES.values():
+        assert all(w == w.lower() for w in words), words  # the check lower-cases the explanation
+    named = {"ja": "スマホの傾きが記録されていません", "zh-CN": "手机的倾斜角度没有记录", "de": "Die Neigung des Telefons fehlt",
+             "fr": "l'inclinaison du téléphone", "es": "la inclinación del teléfono", "vi": "độ nghiêng của điện thoại",
+             "id": "kemiringan ponsel tidak tercatat"}
+    for lang, text in named.items():
+        assert any(w in text.lower() for w in UNKNOWN_CAUSES["tilt"][2]), lang
