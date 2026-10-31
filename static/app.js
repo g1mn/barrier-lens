@@ -532,6 +532,8 @@
     $('#stage-ctl').hidden = false;
     renderVerdict(result, sample);
     dropPin(result, at);
+    // wide screens: the panel has just widened for the clip and the verdict (app.css); keep the pin in the map strip
+    if (at && window.matchMedia('(min-width: 1100px)').matches) requestAnimationFrame(() => centreOn(at));
     if (stage.classList.contains('no-video')) { check.playing = false; togglePlay(); } else { draw(); video.play().catch(() => {}); }
     loopForVideo();
     if (!tourRunning) {  // the tour keeps focus and scrolls on its own card instead
@@ -1964,7 +1966,11 @@
     tourShowCheck();
     $('#clip').focus();
   }
-  $('#tour-btn').addEventListener('click', startTour);
+  $('#tour-btn').addEventListener('click', () => {
+    // during the intro, the tour button ends it first: the two never play at once
+    if (!$('#intro').hidden) { $('#intro-skip').click(); introDone.then(startTour, startTour); return; }
+    startTour();
+  });
   tourPauseBtn.addEventListener('click', () => tourSetPaused(!tour.paused));
   tourNextBtn.addEventListener('click', tourNext);
   $('#tour-close').addEventListener('click', tourCloseFull);

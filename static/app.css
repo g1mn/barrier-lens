@@ -123,6 +123,9 @@ button, input, select { font: inherit; color: inherit; }
 }
 .leaflet-container { font: 14px/1.4 var(--font); }
 .leaflet-control-attribution { font-size: 11px; }
+@media (max-width: 899px) {
+  .leaflet-top.leaflet-left .leaflet-control-attribution { font-size: 9.5px; line-height: 1.35; max-width: calc(100vw - 72px); padding: 1px 5px; border-radius: 0 0 6px 0; }
+}
 .leaflet-bar a { width: 40px !important; height: 40px !important; line-height: 40px !important; font-size: 20px !important; }
 .leaflet-popup-content { margin: 12px 14px; font-size: 14px; color: #111; word-break: keep-all; }
 .leaflet-popup-content h4 { margin: 0 0 4px; font-size: 15px; }
@@ -366,6 +369,29 @@ input[type="file"]::file-selector-button {
 .fixit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 10px; }
 .fixit .hint { font-size: .86rem; }
 
+/* ---------- wide screens with a result: the clip (with SAM 3.1's outlines) beside the verdict ----------
+   In one 366 px column the verdict sat ~1,000 px below the clip, so the outline and the answer were never in
+   view together. The panel widens (the map keeps a 424 px strip; the tour card fits there) and the clip,
+   its controls and the input steps go left, the verdict right. */
+@media (min-width: 1100px) {
+  .sheet:has(#verdict:not([hidden])) { width: min(900px, calc(100vw - 440px)); }
+  /* the clip loads after the scroll to the verdict; scroll anchoring would then push both out of view */
+  .sheet:has(#verdict:not([hidden])) .sheet-body { overflow-anchor: none; }
+  #panel-check:has(> #verdict:not([hidden])) {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); column-gap: 20px; align-items: start;
+    grid-template-rows: auto auto auto auto auto auto 1fr;
+    grid-template-areas: "stage verdict" "ctl verdict" "back verdict" "steps verdict" "calib verdict" "tilt verdict" ". verdict";
+  }
+  #panel-check:has(> #verdict:not([hidden])) > #stage { grid-area: stage; justify-self: center; width: fit-content; max-width: 100%; }
+  #panel-check:has(> #verdict:not([hidden])) > #stage video { width: auto; max-width: 100%; max-height: calc(100dvh - 300px); }
+  #panel-check:has(> #verdict:not([hidden])) > #stage-ctl { grid-area: ctl; }
+  #panel-check:has(> #verdict:not([hidden])) > #back-btn { grid-area: back; justify-self: start; margin-top: 8px; }
+  #panel-check:has(> #verdict:not([hidden])) > .steps { grid-area: steps; margin-top: 18px; }
+  #panel-check:has(> #verdict:not([hidden])) > #calib { grid-area: calib; margin-top: 14px; }
+  #panel-check:has(> #verdict:not([hidden])) > #tilt-row { grid-area: tilt; }
+  #panel-check:has(> #verdict:not([hidden])) > #verdict { grid-area: verdict; margin-top: 16px; }
+}
+
 /* ---------- 1-minute tour ---------- */
 .tour-btn { white-space: nowrap; margin-left: auto; }
 .tour-card {
@@ -387,7 +413,7 @@ input[type="file"]::file-selector-button {
 .tour-controls + .tour-controls { margin-top: 8px; }
 .tour-hit { outline: 3px solid var(--accent) !important; outline-offset: 2px; border-radius: 8px; }
 @media (min-width: 900px) {
-  .tour-card { left: 432px; right: 16px; max-width: 430px; }
+  .tour-card { left: auto; right: 16px; width: min(400px, calc(100vw - 448px)); }
 }
 @media (max-width: 600px) {
   .tour-btn .tour-full { display: none; }
