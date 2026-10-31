@@ -10,6 +10,7 @@ Built during the Meta Global AI Developer Hackathon (build window Oct 27 – Nov
 
 | | |
 |---|---|
+| **Demo video (2:51)** | https://youtu.be/VOkYFrEzF2U |
 | **Live demo** | https://g1mn--barrier-lens-web.us-east.modal.run |
 | **1-minute tour** | https://g1mn--barrier-lens-web.us-east.modal.run/#tour (self-running, recorded runs, no sign-in) |
 | **Your own clip** | needs the judge token given in the submission, because every live check is a paid call |
