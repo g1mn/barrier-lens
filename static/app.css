@@ -378,6 +378,10 @@ input[type="file"]::file-selector-button {
 .tour-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .tour-top h2 { margin: 0; font-size: 1.02rem; }
 .tour-progress { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tour-bar { display: flex; gap: 4px; margin: 8px 0 0; }
+.tour-bar i { flex: 1; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.tour-bar b { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s linear; }
+.tour-bar[data-paused="true"] b { opacity: .4; }
 .tour-text { margin: 6px 0 10px; font-size: .95rem; }
 .tour-controls { display: flex; flex-wrap: wrap; gap: 8px; }
 .tour-controls + .tour-controls { margin-top: 8px; }
@@ -412,6 +416,7 @@ input[type="file"]::file-selector-button {
 }
 @media (prefers-reduced-motion: reduce) {
   .tour-card { transition: none; }
+  .tour-bar b { transition: none; }
 }
 
 /* ---------- opening intro: globe dive, the map's data, then one recorded check ---------- */

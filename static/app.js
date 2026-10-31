@@ -1768,6 +1768,18 @@
       text: () => _('Calibrate once: chair width, armrest height, and three seconds of four A4 sheets on the floor. Then your own checks can become decisive.'),
       enter: async () => { tourShowCheck(); $('#calib').open = true; } },
   ];
+  // One segment per step: done steps full, the current one fills as its time runs, dimmed while paused,
+  // so the tour visibly moves even when a step is only text (user 10-31: "멈춘건가 했어").
+  const tourBarEl = $('#tour-bar');
+  tourBarEl.innerHTML = TOUR_STEPS.map(() => '<i><b></b></i>').join('');
+  function tourBar() {
+    const step = TOUR_STEPS[tour.idx];
+    tourBarEl.querySelectorAll('b').forEach((b, i) => {
+      const f = tour.ended || i < tour.idx ? 1 : i > tour.idx ? 0 : Math.min(1, Math.max(0, 1 - tour.remain / step.dur));
+      b.style.width = `${(f * 100).toFixed(1)}%`;
+    });
+    tourBarEl.dataset.paused = String(tour.paused && !tour.ended);
+  }
   const TOUR_END_TEXT = _('That was the product, replayed from recorded live runs (Muse Spark 1.3 and SAM 3.1 on the Meta Model API). Live checks on your own clip need the judge token.');
 
   // Quiet twins of enterCheck/leaveCheck: same panels, no focus moves (the tour owns focus).
@@ -1806,6 +1818,7 @@
     $('#tour-title').textContent = step.title;
     $('#tour-text').textContent = step.text();
     $('#tour-progress').textContent = `${tour.idx + 1} / ${TOUR_STEPS.length}`;
+    tourBar();
   }
   function tourWaitResult(tok, prev, timeoutMs) {
     return new Promise((resolve) => {
@@ -1881,6 +1894,7 @@
     if (!tour.active || tour.paused || tour.ended) return;
     const step = TOUR_STEPS[tour.idx];
     tour.remain -= 0.2;
+    tourBar();
     if (step.thenTargets && !tour.swapped && (step.dur - tour.remain) >= step.dur * (step.thenAt || 0.5)) {
       tour.swapped = true;
       tourHighlight(step, true);
@@ -1892,6 +1906,7 @@
     tour.paused = p;
     tourPauseBtn.setAttribute('aria-pressed', String(p));
     tourPauseBtn.textContent = p ? _('▶ Resume') : _('⏸ Pause');
+    tourBar();
   }
   function startTour() {
     if (!tour.active) tour.calibWasOpen = $('#calib').open;
@@ -1916,6 +1931,7 @@
     $('#tour-title').textContent = _('That was the product');
     $('#tour-text').textContent = TOUR_END_TEXT;
     $('#tour-progress').textContent = `${TOUR_STEPS.length} / ${TOUR_STEPS.length}`;
+    tourBar();
     tourPauseBtn.hidden = true;
     tourNextBtn.hidden = true;
     tourEndBox.hidden = false;
