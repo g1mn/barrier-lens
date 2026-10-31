@@ -1026,7 +1026,7 @@
   function renderAssumptions(result) {
     const a = result.assumptions;
     const el = $('#v-assume');
-    if (!a) { el.hidden = true; return; }
+    if (!a || result.measurement_detail?.override === 'path_closed') { el.hidden = true; return; }
     el.dataset.mode = a.mode;
     $('#v-assume-tag').textContent = tr(a.label);
     $('#v-assume-text').textContent = tr(a.main);

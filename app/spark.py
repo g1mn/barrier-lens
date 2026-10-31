@@ -6,9 +6,9 @@ numbers in an explanation must come from the measurement it was given.
 Backends, picked in this order unless SPARK_BACKEND=meta|baseten|replay forces one:
   meta     Muse Spark on the Meta Model API, when META_API_KEY is set.
            POST https://api.meta.ai/v1/chat/completions, model muse-spark-1.3,
-           response_format json_schema, reasoning_effort, max_completion_tokens, tools
+           response_format json_schema, reasoning_effort, max_completion_tokens
            (https://dev.meta.ai/docs/api-reference/chat-completions/schemas,
-            https://dev.meta.ai/docs/structured-output, https://dev.meta.ai/docs/tool-calling,
+            https://dev.meta.ai/docs/structured-output,
             https://dev.meta.ai/docs/image-understanding, read 2026-10-28).
   baseten  Muse Spark Open on Baseten (OpenAI-compatible), when BASETEN_API_KEY is set.
            Accepts the same json_schema and reasoning_effort fields (checked 2026-10-28).
@@ -47,29 +47,6 @@ class SparkError(RuntimeError):
     """Muse Spark could not give a valid answer (no key and no replay, HTTP error, or invalid output twice)."""
 
 
-# ---------------------------------------------------------------- tool hook (schema only)
-
-FIND_STEP_FREE_DETOUR = {
-    "type": "function",
-    "function": {
-        "name": "find_step_free_detour",
-        "description": ("Find a step-free walking route around a blocked sidewalk point, starting near the "
-                        "given position. Returns route waypoints and any kerb ramps on the way."),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "lat": {"type": "number", "description": "Latitude of the blocked point, WGS84."},
-                "lon": {"type": "number", "description": "Longitude of the blocked point, WGS84."},
-            },
-            "required": ["lat", "lon"],
-            "additionalProperties": False,
-        },
-        "strict": True,
-    },
-}
-TOOLS = [FIND_STEP_FREE_DETOUR]
-
-
 REF_KINDS = ("paper", "tactile paving", "none")
 
 
@@ -82,11 +59,6 @@ def ref_kind(ref: dict) -> str:
         return "none"
     text = str(ref.get("evidence", "")).lower()
     return "tactile paving" if "tactile" in text else "paper"
-
-
-async def find_step_free_detour(lat: float, lon: float) -> dict:
-    """Handler for the tool above. Not built yet; nothing passes TOOLS to the model so far."""
-    raise NotImplementedError("find_step_free_detour is a schema-only hook for now")
 
 
 # ---------------------------------------------------------------- backends
